@@ -22,6 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
+#include <string.h>
 
 /* USER CODE END INCLUDE */
 
@@ -94,6 +95,13 @@ uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
+static uint8_t cdc_line_coding[7] =
+{
+  0x00, 0xC2, 0x01, 0x00, /* 115200 baud */
+  0x00,                   /* 1 stop bit */
+  0x00,                   /* No parity */
+  0x08                    /* 8 data bits */
+};
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -218,10 +226,12 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
   /* 6      | bDataBits  |   1   | Number Data bits (5, 6, 7, 8 or 16).          */
   /*******************************************************************************/
     case CDC_SET_LINE_CODING:
+      (void)memcpy(cdc_line_coding, pbuf, sizeof(cdc_line_coding));
 
     break;
 
     case CDC_GET_LINE_CODING:
+      (void)memcpy(pbuf, cdc_line_coding, sizeof(cdc_line_coding));
 
     break;
 
@@ -259,6 +269,15 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
+  USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+
+  if ((hcdc != NULL) && (hcdc->TxState == 0U) && (*Len > 0U) && (*Len <= APP_TX_DATA_SIZE))
+  {
+    (void)memcpy(UserTxBufferFS, Buf, *Len);
+    USBD_CDC_SetTxBuffer(&hUsbDeviceFS, UserTxBufferFS, (uint16_t)*Len);
+    (void)USBD_CDC_TransmitPacket(&hUsbDeviceFS);
+  }
+
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);
@@ -281,6 +300,10 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
   uint8_t result = USBD_OK;
   /* USER CODE BEGIN 7 */
   USBD_CDC_HandleTypeDef *hcdc = (USBD_CDC_HandleTypeDef*)hUsbDeviceFS.pClassData;
+  if (hcdc == NULL)
+  {
+    return USBD_FAIL;
+  }
   if (hcdc->TxState != 0){
     return USBD_BUSY;
   }

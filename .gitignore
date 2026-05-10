@@ -1,0 +1,45 @@
+# STM32CubeIDE / Eclipse CDT build output
+/Debug/
+/Release/
+/build/
+/Build/
+
+# Compiled objects and dependency files
+*.o
+*.obj
+*.d
+*.su
+*.cyclo
+
+# Firmware/output artifacts
+*.elf
+*.hex
+*.bin
+*.map
+*.list
+*.lst
+*.siz
+
+# Local debug/run settings
+*.launch
+*.log
+
+# Eclipse workspace/cache files
+/.metadata/
+/.recommenders/
+/RemoteSystemsTempFiles/
+/.settings/language.settings.xml
+/.settings/stm32cubeide.project.prefs
+
+# Temporary/backup files
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini

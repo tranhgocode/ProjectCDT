@@ -178,16 +178,12 @@ TMC2209_StatusTypeDef TMC2209_Init(TMC2209_HandleTypeDef *hmotor);
  * @param  hold_current 0..31
  * @param  hold_delay   0..15 (x 2^18 clock, do tre truoc giam dong)
  */
-TMC2209_StatusTypeDef TMC2209_SetCurrent(TMC2209_HandleTypeDef *hmotor,
-                                         uint8_t run_current,
-                                         uint8_t hold_current,
-                                         uint8_t hold_delay);
+TMC2209_StatusTypeDef TMC2209_SetCurrent(TMC2209_HandleTypeDef *hmotor, uint8_t run_current, uint8_t hold_current, uint8_t hold_delay);
  
 /**
  * @brief  Dat so microstep (cap nhat ca CHOPCONF va steps_per_rev cache)
  */
-TMC2209_StatusTypeDef TMC2209_SetMicrostep(TMC2209_HandleTypeDef *hmotor,
-                                           TMC2209_MicrostepTypeDef microstep);
+TMC2209_StatusTypeDef TMC2209_SetMicrostep(TMC2209_HandleTypeDef *hmotor, TMC2209_MicrostepTypeDef microstep);
  
 /**
  * @brief  Bat / tat StealthChop (giam on ao o toc do thap)
@@ -212,8 +208,7 @@ void TMC2209_Disable(TMC2209_HandleTypeDef *hmotor);
 /**
  * @brief  Dat chieu quay
  */
-void TMC2209_SetDirection(TMC2209_HandleTypeDef *hmotor,
-                          TMC2209_DirectionTypeDef dir);
+void TMC2209_SetDirection(TMC2209_HandleTypeDef *hmotor, TMC2209_DirectionTypeDef dir);
  
 /* --- Dieu khien toc do (PWM) ---------------------------------------------- */
  
@@ -222,14 +217,12 @@ void TMC2209_SetDirection(TMC2209_HandleTypeDef *hmotor,
  *         Ham tu dong tinh ARR cua Timer
  * @param  freq_hz  Tan so xung mong muon
  */
-TMC2209_StatusTypeDef TMC2209_SetSpeedHz(TMC2209_HandleTypeDef *hmotor,
-                                         uint32_t freq_hz);
+TMC2209_StatusTypeDef TMC2209_SetSpeedHz(TMC2209_HandleTypeDef *hmotor, uint32_t freq_hz);
  
 /**
  * @brief  Dat toc do theo vong/phut (RPM)
  */
-TMC2209_StatusTypeDef TMC2209_SetSpeedRPM(TMC2209_HandleTypeDef *hmotor,
-                                          float rpm);
+TMC2209_StatusTypeDef TMC2209_SetSpeedRPM(TMC2209_HandleTypeDef *hmotor, float rpm);
  
 /**
  * @brief  Bat dau quay (start PWM)
@@ -247,17 +240,12 @@ void TMC2209_Stop(TMC2209_HandleTypeDef *hmotor);
  * @brief  Quay them N buoc (khong blocking)
  *         Goi TMC2209_UpdateSteps() trong interrupt dem buoc de biet khi nao dung
  */
-TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor,
-                                        uint32_t steps,
-                                        TMC2209_DirectionTypeDef dir,
-                                        float speed_rpm);
+TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor, uint32_t steps, TMC2209_DirectionTypeDef dir, float speed_rpm);
  
 /**
  * @brief  Quay den goc tuyet doi (do, 0..360)
  */
-TMC2209_StatusTypeDef TMC2209_MoveToAngle(TMC2209_HandleTypeDef *hmotor,
-                                          float angle_deg,
-                                          float speed_rpm);
+TMC2209_StatusTypeDef TMC2209_MoveToAngle(TMC2209_HandleTypeDef *hmotor, float angle_deg, float speed_rpm);
  
 /**
  * @brief  Goi trong Timer Period Elapsed ISR hoac PWM Pulse Finished ISR
@@ -271,14 +259,12 @@ bool TMC2209_UpdateSteps(TMC2209_HandleTypeDef *hmotor);
 /**
  * @brief  Doc register DRV_STATUS
  */
-TMC2209_StatusTypeDef TMC2209_ReadDrvStatus(TMC2209_HandleTypeDef *hmotor,
-                                            uint32_t *status_out);
+TMC2209_StatusTypeDef TMC2209_ReadDrvStatus(TMC2209_HandleTypeDef *hmotor, uint32_t *status_out);
  
 /**
  * @brief  Doc register SG_RESULT (stallguard)
  */
-TMC2209_StatusTypeDef TMC2209_ReadSGResult(TMC2209_HandleTypeDef *hmotor,
-                                           uint16_t *sg_out);
+TMC2209_StatusTypeDef TMC2209_ReadSGResult(TMC2209_HandleTypeDef *hmotor, uint16_t *sg_out);
  
 /**
  * @brief  Kiem tra co bi ket dong co khong (qua stallguard)
@@ -298,21 +284,14 @@ bool TMC2209_HasFault(TMC2209_HandleTypeDef *hmotor);
 /**
  * @brief  Ghi 1 register TMC2209 qua UART
  */
-TMC2209_StatusTypeDef TMC2209_WriteReg(TMC2209_HandleTypeDef *hmotor,
-                                       uint8_t reg_addr,
-                                       uint32_t value);
+TMC2209_StatusTypeDef TMC2209_WriteReg(TMC2209_HandleTypeDef *hmotor, uint8_t reg_addr, uint32_t value);
  
 /**
  * @brief  Doc 1 register TMC2209 qua UART
  */
-TMC2209_StatusTypeDef TMC2209_ReadReg(TMC2209_HandleTypeDef *hmotor,
-                                      uint8_t reg_addr,
-                                      uint32_t *value_out);
+TMC2209_StatusTypeDef TMC2209_ReadReg(TMC2209_HandleTypeDef *hmotor, uint8_t reg_addr, uint32_t *value_out);
  
-/* ============================================================================
- * INLINE HELPERS
- * ============================================================================ */
- 
+
 /**
  * @brief  Tinh tan so xung tuong ung voi RPM
  *         freq = (RPM * steps_per_rev * microstep) / 60

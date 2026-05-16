@@ -26,7 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
-#include "my_config.h"
+#include "my_app.h"
 
 /* USER CODE END Includes */
 

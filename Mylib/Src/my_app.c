@@ -5,6 +5,7 @@
  *      Author: Lap4all
  */
 
+#include "my_app.h"
 #include "my_config.h"
 #include "tim.h"
 

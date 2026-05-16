@@ -108,20 +108,17 @@ TMC2209_StatusTypeDef TMC2209_ReadReg(TMC2209_HandleTypeDef *hmotor,
     HAL_StatusTypeDef ret;
  
     /* --- Gui request --- */
-    ret = HAL_UART_Transmit(TMC2209_UART, req, TMC2209_READ_REQ_LEN,
-                            TMC2209_UART_TIMEOUT);
+    ret = HAL_UART_Transmit(TMC2209_UART, req, TMC2209_READ_REQ_LEN, TMC2209_UART_TIMEOUT);
     if (ret == HAL_TIMEOUT) return TMC2209_TIMEOUT;
     if (ret != HAL_OK)      return TMC2209_ERROR;
  
     /* --- Nhan echo (TMC2209 echo lai 4 byte request) --- */
-    ret = HAL_UART_Receive(TMC2209_UART, echo, TMC2209_READ_REQ_LEN,
-                           TMC2209_UART_TIMEOUT);
+    ret = HAL_UART_Receive(TMC2209_UART, echo, TMC2209_READ_REQ_LEN, TMC2209_UART_TIMEOUT);
     if (ret == HAL_TIMEOUT) return TMC2209_TIMEOUT;
     if (ret != HAL_OK)      return TMC2209_ERROR;
  
     /* --- Nhan reply 8 byte --- */
-    ret = HAL_UART_Receive(TMC2209_UART, reply, TMC2209_READ_REPLY_LEN,
-                           TMC2209_UART_TIMEOUT);
+    ret = HAL_UART_Receive(TMC2209_UART, reply, TMC2209_READ_REPLY_LEN, TMC2209_UART_TIMEOUT);
     if (ret == HAL_TIMEOUT) return TMC2209_TIMEOUT;
     if (ret != HAL_OK)      return TMC2209_ERROR;
  

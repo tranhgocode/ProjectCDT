@@ -62,6 +62,21 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void USB_ForceReEnumeration(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+  HAL_Delay(30);
+}
 
 /* USER CODE END 0 */
 
@@ -94,6 +109,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  USB_ForceReEnumeration();
   MX_USB_DEVICE_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
@@ -104,7 +120,7 @@ int main(void)
   // uint32_t last_usb_tx_tick = HAL_GetTick();
   // uint8_t first_usb_message_sent = 0U;
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-  MyApp_TestStep1();
+  MyApp_SensorUsb_Init();
 
   /* USER CODE END 2 */
 
@@ -115,6 +131,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    MyApp_SensorUsb_Task();
     // if ((HAL_GetTick() - last_usb_tx_tick) >= 1000U)
     // {
     //   last_usb_tx_tick = HAL_GetTick();

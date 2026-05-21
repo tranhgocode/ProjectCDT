@@ -17,5 +17,7 @@ extern TMC2209_HandleTypeDef motor3;
 void Motors_Config(void);
 void Motors_Init(void);
 void MyApp_TestStep1(void);
+void MyApp_SensorUsb_Init(void);
+void MyApp_SensorUsb_Task(void);
 
 #endif /* MYLIB_INC_MY_APP_H_ */

@@ -21,3 +21,4 @@ void MyApp_SensorUsb_Init(void);
 void MyApp_SensorUsb_Task(void);
 
 #endif /* MYLIB_INC_MY_APP_H_ */
+d

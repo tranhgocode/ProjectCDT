@@ -77,6 +77,7 @@ static void USB_ForceReEnumeration(void)
 
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
   HAL_Delay(30);
+  HAL_GPIO_DeInit(GPIOA, GPIO_PIN_12);
 }
 
 /* USER CODE END 0 */
@@ -110,6 +111,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  USB_ForceReEnumeration();
   MX_USB_DEVICE_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
@@ -132,7 +134,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    MyApp_SensorUsb_Task();
+    HAL_IWDG_Refresh(&hiwdg);
+    //MyApp_SensorUsb_Task();
     // if ((HAL_GetTick() - last_usb_tx_tick) >= 1000U)
     // {
     //   last_usb_tx_tick = HAL_GetTick();

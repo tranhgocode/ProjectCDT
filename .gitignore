@@ -23,6 +23,12 @@
 # Local debug/run settings
 *.launch
 *.log
+/.vscode/
+
+# Local serial/USB helper output
+/my_tool/logs/
+/my_tool/__pycache__/
+*.pyc
 
 # Eclipse workspace/cache files
 /.metadata/
@@ -47,3 +53,4 @@ Desktop.ini
 # STM32_Lib
 /Drivers/
 /Middlewares/
+/my_tool/

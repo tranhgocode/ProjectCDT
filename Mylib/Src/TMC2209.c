@@ -362,7 +362,7 @@ TMC2209_StatusTypeDef TMC2209_Start(TMC2209_HandleTypeDef *hmotor)
     if (hmotor->enable_state == TMC2209_DISABLE)
         TMC2209_Enable(hmotor);
  
-    HAL_StatusTypeDef ret = HAL_TIM_PWM_Start(hmotor->htim, hmotor->tim_channel);
+    HAL_StatusTypeDef ret = HAL_TIM_PWM_Start_IT(hmotor->htim, hmotor->tim_channel);
     if (ret != HAL_OK) return TMC2209_ERROR;
  
     hmotor->state = TMC2209_RUNNING;
@@ -371,7 +371,7 @@ TMC2209_StatusTypeDef TMC2209_Start(TMC2209_HandleTypeDef *hmotor)
  
 void TMC2209_Stop(TMC2209_HandleTypeDef *hmotor)
 {
-    HAL_TIM_PWM_Stop(hmotor->htim, hmotor->tim_channel);
+    (void)HAL_TIM_PWM_Stop_IT(hmotor->htim, hmotor->tim_channel);
     hmotor->state = TMC2209_STOPPED;
 }
  

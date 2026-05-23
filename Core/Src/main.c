@@ -27,7 +27,6 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "usbd_cdc_if.h"
 #include "my_app.h"
 
 /* USER CODE END Includes */
@@ -50,8 +49,6 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-// static const uint8_t usb_cdc_hello[] = "STM32F103 USB CDC ready\r\n";
-// static const uint8_t usb_cdc_heartbeat[] = "test usb\r\n";
 
 /* USER CODE END PV */
 
@@ -120,8 +117,6 @@ int main(void)
   MX_I2C1_Init();
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
-  // uint32_t last_usb_tx_tick = HAL_GetTick();
-  // uint8_t first_usb_message_sent = 0U;
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
   MyApp_SensorUsb_Init();
 
@@ -135,27 +130,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     HAL_IWDG_Refresh(&hiwdg);
-    //MyApp_SensorUsb_Task();
-    // if ((HAL_GetTick() - last_usb_tx_tick) >= 1000U)
-    // {
-    //   last_usb_tx_tick = HAL_GetTick();
-
-    //   if (first_usb_message_sent == 0U)
-    //   {
-    //     if (CDC_Transmit_FS((uint8_t *)usb_cdc_hello, sizeof(usb_cdc_hello) - 1U) == USBD_OK)
-    //     {
-    //       first_usb_message_sent = 1U;
-    //       HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    //     }
-    //   }
-    //   else
-    //   {
-    //     if (CDC_Transmit_FS((uint8_t *)usb_cdc_heartbeat, sizeof(usb_cdc_heartbeat) - 1U) == USBD_OK)
-    //     {
-    //       HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    //     }
-    //   }
-    // }
+    My_app();
   }
   /* USER CODE END 3 */
 }

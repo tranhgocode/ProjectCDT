@@ -1,85 +1,70 @@
 # Change Log
 
-## Muc tieu
+## Current App Flow
 
-Them luong dieu khien trong tang app:
+1. On boot, the app sets the current yaw coordinate to `0.00 deg`.
+2. The AS5600 sensor path is initialized through TCA9548A channel 0.
+3. The current AS5600 position is used as the initial yaw zero.
+4. USB CDC command `zero` can be sent at any time while idle to reset the
+   current AS5600 position as yaw `0.00 deg`.
+5. Numeric USB CDC input is treated as an absolute target yaw in degrees.
+6. The valid target range is `0.00..360.00 deg`.
+7. The app calculates `target_yaw - current_yaw`.
+8. Positive delta rotates `TMC2209_DIR_CW`.
+9. Negative delta rotates `TMC2209_DIR_CCW`.
+10. After the motor stops, the app reads AS5600 again and prints the result.
 
-1. Cho gia tri goc nhap tu USB CDC.
-2. Doc goc AS5600 hien tai truoc khi chay motor.
-3. Tinh so buoc motor can di tu goc input.
-4. Dieu khien motor quay theo so buoc do.
-5. Khi motor dung, doc lai goc AS5600.
-6. Gui ket qua ra cong COM USB CDC.
-7. Quay lai trang thai cho lenh tiep theo.
-
-## Cach nhap lenh
-
-Gui mot gia tri goc theo don vi degree qua COM USB CDC:
-
-```text
-90
--45.50
-10.25
-```
-
-Pham vi dang chap nhan:
+## Command Examples
 
 ```text
--360.00 .. 360.00 deg
+zero
+120
+360
+90.50
 ```
 
-Gia tri duong quay theo `TMC2209_DIR_CW`, gia tri am quay theo `TMC2209_DIR_CCW`.
+Examples:
 
-## Format phan hoi USB CDC
+- Current yaw `0.00`, input `120.00` -> rotate forward `+120.00 deg`.
+- Current yaw `360.00`, input `120.00` -> rotate backward `-240.00 deg`.
+
+## USB CDC Report
 
 ```text
-input_deg=...,start_deg=...,end_deg=...,delta_deg=...,error_deg=...,steps=...
+input_deg=120.00,start_deg=0.00,end_deg=119.97,delta_deg=119.97,error_deg=0.03,steps=4800
 ```
 
-Y nghia:
+Fields:
 
-- `input_deg`: gia tri nhan duoc, don vi degree.
-- `start_deg`: goc cam bien luc dau, don vi degree.
-- `end_deg`: goc cam bien luc sau, don vi degree.
-- `delta_deg`: delta giua goc luc sau va luc dau, don vi degree.
-- `error_deg`: `input_deg - delta_deg`, don vi degree.
-- `steps`: so microstep da tinh de dieu khien motor.
+- `input_deg`: target yaw received from USB CDC.
+- `start_deg`: AS5600 yaw before motor movement.
+- `end_deg`: AS5600 yaw after motor movement.
+- `delta_deg`: measured AS5600 movement.
+- `error_deg`: commanded delta minus measured delta.
+- `steps`: motor microsteps generated for the move.
 
-Vi du `90.00 deg` duoc in ra la `90.00`.
-
-## File da sua
+## Files Changed
 
 - `Core/Src/main.c`
-  - Goi `My_app()` trong vong lap chinh.
-  - Xoa doan code test USB CDC da comment.
+  - Calls `my_app_init()` once during startup.
+  - Calls `my_app_process()` repeatedly in the main loop.
 
 - `Mylib/Inc/my_app.h`
-  - Them prototype `MyApp_ScaleAngleTo4000()`.
-  - Them prototype `MyApp_CalculateMotorStepsFromAngle()`.
-  - Them prototype `My_app()`.
+  - Uses snake_case app API names.
+  - Keeps only public functions currently used by the app.
 
 - `Mylib/Src/my_app.c`
-  - Them state machine cho app: cho lenh, chay motor, report ket qua.
-  - Them parser doc goc tu USB CDC.
-  - Them ham doc AS5600 va doi sang centidegree.
-  - Format gia tri report ra USB CDC theo don vi degree.
-  - Them ham tinh buoc motor tu goc input.
-  - Them callback `HAL_TIM_PWM_PulseFinishedCallback()` de dem buoc motor.
-
-- `USB_DEVICE/App/usbd_cdc_if.h`
-  - Them API `CDC_ReadCommand()` de tang app lay lenh USB CDC.
+  - Reworked app logic from relative move input to absolute yaw target input.
+  - Added `zero` command handling.
+  - Tracks `s_current_yaw_cdeg` internally.
+  - Uses AS5600 zero offset stored in `s_sensor_zero_cdeg`.
+  - Removed old unused relative-move helpers.
 
 - `USB_DEVICE/App/usbd_cdc_if.c`
-  - Doi callback receive: chi copy lenh USB vao buffer, khong echo trong callback.
-  - Them buffer lenh pending de `My_app()` xu ly o main loop.
+  - Keeps received USB CDC command in a pending buffer for the app layer.
+
+- `USB_DEVICE/App/usbd_cdc_if.h`
+  - Exposes `CDC_ReadCommand()` for app-layer command polling.
 
 - `Mylib/Src/TMC2209.c`
-  - Doi PWM start/stop sang ban co interrupt: `HAL_TIM_PWM_Start_IT()` va
-    `HAL_TIM_PWM_Stop_IT()`.
-  - Muc dich la de `TMC2209_UpdateSteps()` duoc goi va motor tu dung dung so buoc.
-
-## Luu y ky thuat
-
-- AS5600 chi do goc trong mot vong, nen ket qua `delta_deg` duoc tinh theo huong input.
-- Neu input gan `360 deg`, sai so co the bi anh huong boi diem wrap `359.99 -> 0.00`.
-- Motor dang dung `motor1` lam truc dieu khien chinh.
+  - Uses PWM interrupt start/stop so step pulses can be counted and stopped.

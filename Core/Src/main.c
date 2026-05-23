@@ -118,7 +118,7 @@ int main(void)
   MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-  MyApp_SensorUsb_Init();
+  my_app_init();
 
   /* USER CODE END 2 */
 
@@ -130,7 +130,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     HAL_IWDG_Refresh(&hiwdg);
-    My_app();
+    my_app_process();
   }
   /* USER CODE END 3 */
 }

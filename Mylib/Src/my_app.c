@@ -5,92 +5,108 @@
  *      Author: Lap4all
  */
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-
+#include "my_app.h"
 #include "as5600.h"
 #include "i2c.h"
-#include "my_app.h"
 #include "my_config.h"
 #include "tca9548a.h"
 #include "tim.h"
 #include "usbd_cdc_if.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 
 TMC2209_HandleTypeDef motor1;
 TMC2209_HandleTypeDef motor2;
 TMC2209_HandleTypeDef motor3;
 
-#define MYAPP_SENSOR_CHANNEL             TCA9548A_CH0
-#define MYAPP_I2C_TIMEOUT_MS             20u
-#define MYAPP_USB_TX_BUFFER_SIZE         192u
-#define MYAPP_USB_RX_BUFFER_SIZE         64u
-#define MYAPP_ANGLE_TEXT_BUFFER_SIZE     16u
-#define MYAPP_AS5600_RAW_STEPS           4096u
-#define MYAPP_ANGLE_SCALE_STEPS          3600u
-#define MYAPP_FULL_TURN_CDEG             36000l
-#define MYAPP_ANGLE_SCALE_CDEG           9u
-#define MYAPP_MOTOR_SPEED_RPM            60.0f
-#define MYAPP_INPUT_MAX_ABS_CDEG         36000l
-#define MYAPP_STEP_SCALE_NUMERATOR       9u
-#define MYAPP_STEP_SCALE_DENOMINATOR     2u
+#define MY_APP_SENSOR_CHANNEL              TCA9548A_CH0
+#define MY_APP_I2C_TIMEOUT_MS              20u
+#define MY_APP_USB_TX_BUFFER_SIZE          192u
+#define MY_APP_USB_RX_BUFFER_SIZE          64u
+#define MY_APP_ANGLE_TEXT_BUFFER_SIZE      16u
+#define MY_APP_AS5600_RAW_STEPS            4096u
+#define MY_APP_FULL_TURN_CDEG              36000l
+#define MY_APP_MOTOR_SPEED_RPM             60.0f
+#define MY_APP_STEP_SCALE_NUMERATOR        9u
+#define MY_APP_STEP_SCALE_DENOMINATOR      2u
 
 typedef enum {
-    MYAPP_STATE_WAIT_COMMAND = 0,
-    MYAPP_STATE_WAIT_MOTOR,
-} MyApp_State_e;
+    MY_APP_STATE_WAIT_COMMAND = 0,
+    MY_APP_STATE_WAIT_MOTOR,
+} my_app_state_t;
 
 typedef struct {
-    int32_t input_angle_cdeg;
-    int32_t start_angle_cdeg;
+    int32_t target_yaw_cdeg;
+    int32_t start_yaw_cdeg;
+    int32_t move_delta_cdeg;
+    int32_t start_sensor_yaw_cdeg;
     uint32_t target_steps;
-    TMC2209_DirectionTypeDef direction;
-} MyApp_MoveContext_t;
+} my_app_move_context_t;
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
 static TCA9548A_Handle_t s_mux;
 static AS5600_Data_t s_as5600_data;
-static MyApp_State_e s_app_state = MYAPP_STATE_WAIT_COMMAND;
-static MyApp_MoveContext_t s_move_context;
+static my_app_state_t s_app_state = MY_APP_STATE_WAIT_COMMAND;
+static my_app_move_context_t s_move_context;
 static bool s_is_sensor_ready = false;
 static bool s_has_init_error_been_reported = false;
-static char s_usb_tx_buffer[MYAPP_USB_TX_BUFFER_SIZE];
+static int32_t s_sensor_zero_cdeg = 0;
+static int32_t s_current_yaw_cdeg = 0;
+static char s_usb_tx_buffer[MY_APP_USB_TX_BUFFER_SIZE];
 
-static bool MyApp_IsTCA9548AAddress(uint8_t device_address);
-static int8_t MyApp_I2C_Write(uint8_t device_address, uint8_t reg, uint8_t *buffer, uint16_t length);
-static int8_t MyApp_I2C_Read(uint8_t device_address, uint8_t reg, uint8_t *buffer, uint16_t length);
-static void MyApp_DelayMs(uint32_t delay_ms);
-static bool MyApp_USB_IsReady(void);
-static void MyApp_USB_SendText(const char *text);
-static bool MyApp_ParseAngleCdeg(const uint8_t *buffer, uint16_t length, int32_t *angle_cdeg);
-static bool MyApp_ReadSensorAngleCdeg(int32_t *angle_cdeg);
-static void MyApp_FormatAngleDeg(int32_t angle_cdeg, char *buffer, uint16_t buffer_size);
-static int32_t MyApp_CalculateMeasuredDeltaCdeg(int32_t start_angle_cdeg,
-                                                 int32_t end_angle_cdeg,
-                                                 int32_t input_angle_cdeg);
-static TMC2209_DirectionTypeDef MyApp_GetDirectionFromAngle(int32_t angle_cdeg);
-static bool MyApp_StartRelativeMove(int32_t input_angle_cdeg);
-static void MyApp_ProcessUsbCommand(void);
-static void MyApp_ProcessMotorDone(void);
+static bool my_app_is_tca9548a_address(uint8_t device_address);
+static int8_t my_app_i2c_write(uint8_t device_address,
+                               uint8_t reg,
+                               uint8_t *buffer,
+                               uint16_t length);
+static int8_t my_app_i2c_read(uint8_t device_address,
+                              uint8_t reg,
+                              uint8_t *buffer,
+                              uint16_t length);
+static void my_app_delay_ms(uint32_t delay_ms);
+static bool my_app_usb_is_ready(void);
+static void my_app_usb_send_text(const char *text);
+static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length);
+static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
+                                           uint16_t length,
+                                           int32_t *target_angle_cdeg);
+static int32_t my_app_normalize_sensor_yaw_cdeg(int32_t sensor_angle_cdeg);
+static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg);
+static bool my_app_read_sensor_yaw_cdeg(int32_t *sensor_yaw_cdeg);
+static void my_app_format_angle_deg(int32_t angle_cdeg,
+                                    char *buffer,
+                                    uint16_t buffer_size);
+static TMC2209_DirectionTypeDef my_app_get_direction_from_delta(int32_t delta_cdeg);
+static int32_t my_app_calculate_sensor_delta_cdeg(int32_t start_cdeg,
+                                                  int32_t end_cdeg,
+                                                  int32_t expected_delta_cdeg);
+static bool my_app_set_zero_from_sensor(void);
+static bool my_app_start_target_move(int32_t target_yaw_cdeg);
+static void my_app_process_usb_command(void);
+static void my_app_process_motor_done(void);
 
-static bool MyApp_IsTCA9548AAddress(uint8_t device_address)
+static bool my_app_is_tca9548a_address(uint8_t device_address)
 {
     return ((device_address >= TCA9548A_BASE_ADDR) &&
             (device_address <= TCA9548A_ADDR_MAX));
 }
 
-static int8_t MyApp_I2C_Write(uint8_t device_address, uint8_t reg, uint8_t *buffer, uint16_t length)
+static int8_t my_app_i2c_write(uint8_t device_address,
+                               uint8_t reg,
+                               uint8_t *buffer,
+                               uint16_t length)
 {
     HAL_StatusTypeDef hal_status;
 
-    if (MyApp_IsTCA9548AAddress(device_address) == true) {
+    if (my_app_is_tca9548a_address(device_address) == true) {
         (void)reg;
         hal_status = HAL_I2C_Master_Transmit(&hi2c1,
                                              (uint16_t)(device_address << 1),
                                              buffer,
                                              length,
-                                             MYAPP_I2C_TIMEOUT_MS);
+                                             MY_APP_I2C_TIMEOUT_MS);
     } else {
         hal_status = HAL_I2C_Mem_Write(&hi2c1,
                                        (uint16_t)(device_address << 1),
@@ -98,23 +114,26 @@ static int8_t MyApp_I2C_Write(uint8_t device_address, uint8_t reg, uint8_t *buff
                                        I2C_MEMADD_SIZE_8BIT,
                                        buffer,
                                        length,
-                                       MYAPP_I2C_TIMEOUT_MS);
+                                       MY_APP_I2C_TIMEOUT_MS);
     }
 
     return (hal_status == HAL_OK) ? 0 : -1;
 }
 
-static int8_t MyApp_I2C_Read(uint8_t device_address, uint8_t reg, uint8_t *buffer, uint16_t length)
+static int8_t my_app_i2c_read(uint8_t device_address,
+                              uint8_t reg,
+                              uint8_t *buffer,
+                              uint16_t length)
 {
     HAL_StatusTypeDef hal_status;
 
-    if (MyApp_IsTCA9548AAddress(device_address) == true) {
+    if (my_app_is_tca9548a_address(device_address) == true) {
         (void)reg;
         hal_status = HAL_I2C_Master_Receive(&hi2c1,
                                             (uint16_t)(device_address << 1),
                                             buffer,
                                             length,
-                                            MYAPP_I2C_TIMEOUT_MS);
+                                            MY_APP_I2C_TIMEOUT_MS);
     } else {
         hal_status = HAL_I2C_Mem_Read(&hi2c1,
                                       (uint16_t)(device_address << 1),
@@ -122,18 +141,18 @@ static int8_t MyApp_I2C_Read(uint8_t device_address, uint8_t reg, uint8_t *buffe
                                       I2C_MEMADD_SIZE_8BIT,
                                       buffer,
                                       length,
-                                      MYAPP_I2C_TIMEOUT_MS);
+                                      MY_APP_I2C_TIMEOUT_MS);
     }
 
     return (hal_status == HAL_OK) ? 0 : -1;
 }
 
-static void MyApp_DelayMs(uint32_t delay_ms)
+static void my_app_delay_ms(uint32_t delay_ms)
 {
     HAL_Delay(delay_ms);
 }
 
-static bool MyApp_USB_IsReady(void)
+static bool my_app_usb_is_ready(void)
 {
     USBD_CDC_HandleTypeDef *cdc_handle;
 
@@ -149,15 +168,16 @@ static bool MyApp_USB_IsReady(void)
     return true;
 }
 
-static void MyApp_USB_SendText(const char *text)
+static void my_app_usb_send_text(const char *text)
 {
     uint16_t text_length = 0u;
 
-    if ((text == NULL) || (MyApp_USB_IsReady() == false)) {
+    if ((text == NULL) || (my_app_usb_is_ready() == false)) {
         return;
     }
 
-    while ((text[text_length] != '\0') && (text_length < (MYAPP_USB_TX_BUFFER_SIZE - 1u))) {
+    while ((text[text_length] != '\0') &&
+           (text_length < (MY_APP_USB_TX_BUFFER_SIZE - 1u))) {
         text_length++;
     }
 
@@ -166,27 +186,52 @@ static void MyApp_USB_SendText(const char *text)
     }
 }
 
-static bool MyApp_ParseAngleCdeg(const uint8_t *buffer, uint16_t length, int32_t *angle_cdeg)
+static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length)
+{
+    uint16_t start_index = 0u;
+    uint16_t end_index = length;
+
+    while ((start_index < length) &&
+           ((buffer[start_index] == ' ') ||
+            (buffer[start_index] == '\t') ||
+            (buffer[start_index] == '\r') ||
+            (buffer[start_index] == '\n'))) {
+        start_index++;
+    }
+
+    while ((end_index > start_index) &&
+           ((buffer[end_index - 1u] == ' ') ||
+            (buffer[end_index - 1u] == '\t') ||
+            (buffer[end_index - 1u] == '\r') ||
+            (buffer[end_index - 1u] == '\n'))) {
+        end_index--;
+    }
+
+    if ((end_index - start_index) != 4u) {
+        return false;
+    }
+
+    return (((buffer[start_index] == 'z') || (buffer[start_index] == 'Z')) &&
+            ((buffer[start_index + 1u] == 'e') || (buffer[start_index + 1u] == 'E')) &&
+            ((buffer[start_index + 2u] == 'r') || (buffer[start_index + 2u] == 'R')) &&
+            ((buffer[start_index + 3u] == 'o') || (buffer[start_index + 3u] == 'O')));
+}
+
+static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
+                                           uint16_t length,
+                                           int32_t *target_angle_cdeg)
 {
     uint16_t index = 0u;
-    int32_t sign = 1;
     int32_t whole_deg = 0;
     int32_t frac_cdeg = 0;
     uint8_t frac_digits = 0u;
     bool has_digit = false;
 
-    if ((buffer == NULL) || (angle_cdeg == NULL) || (length == 0u)) {
+    if ((buffer == NULL) || (target_angle_cdeg == NULL) || (length == 0u)) {
         return false;
     }
 
     while ((index < length) && ((buffer[index] == ' ') || (buffer[index] == '\t'))) {
-        index++;
-    }
-
-    if ((index < length) && ((buffer[index] == '-') || (buffer[index] == '+'))) {
-        if (buffer[index] == '-') {
-            sign = -1;
-        }
         index++;
     }
 
@@ -213,32 +258,72 @@ static bool MyApp_ParseAngleCdeg(const uint8_t *buffer, uint16_t length, int32_t
         frac_cdeg *= 10;
     }
 
-    if (has_digit == false) {
+    while ((index < length) &&
+           ((buffer[index] == ' ') ||
+            (buffer[index] == '\t') ||
+            (buffer[index] == '\r') ||
+            (buffer[index] == '\n'))) {
+        index++;
+    }
+
+    if ((has_digit == false) || (index != length)) {
         return false;
     }
 
-    *angle_cdeg = sign * ((whole_deg * 100) + frac_cdeg);
+    *target_angle_cdeg = (whole_deg * 100) + frac_cdeg;
     return true;
 }
 
-static bool MyApp_ReadSensorAngleCdeg(int32_t *angle_cdeg)
+static int32_t my_app_normalize_sensor_yaw_cdeg(int32_t sensor_angle_cdeg)
 {
-    uint16_t angle_4000;
+    int32_t yaw_cdeg = sensor_angle_cdeg - s_sensor_zero_cdeg;
 
-    if (angle_cdeg == NULL) {
+    while (yaw_cdeg < 0) {
+        yaw_cdeg += MY_APP_FULL_TURN_CDEG;
+    }
+
+    while (yaw_cdeg >= MY_APP_FULL_TURN_CDEG) {
+        yaw_cdeg -= MY_APP_FULL_TURN_CDEG;
+    }
+
+    return yaw_cdeg;
+}
+
+static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg)
+{
+    if (sensor_angle_cdeg == NULL) {
         return false;
     }
 
-    if (TCA9548A_ReadSensor(&s_mux, MYAPP_SENSOR_CHANNEL, &s_as5600_data) != TCA9548A_OK) {
+    if (TCA9548A_ReadSensor(&s_mux, MY_APP_SENSOR_CHANNEL, &s_as5600_data) != TCA9548A_OK) {
         return false;
     }
 
-    angle_4000 = MyApp_ScaleAngleTo4000(s_as5600_data.angle);
-    *angle_cdeg = (int32_t)angle_4000 * (int32_t)MYAPP_ANGLE_SCALE_CDEG;
+    *sensor_angle_cdeg = (int32_t)(((uint64_t)s_as5600_data.angle *
+                                    (uint64_t)MY_APP_FULL_TURN_CDEG) /
+                                   (uint64_t)MY_APP_AS5600_RAW_STEPS);
     return true;
 }
 
-static void MyApp_FormatAngleDeg(int32_t angle_cdeg, char *buffer, uint16_t buffer_size)
+static bool my_app_read_sensor_yaw_cdeg(int32_t *sensor_yaw_cdeg)
+{
+    int32_t sensor_angle_cdeg = 0;
+
+    if (sensor_yaw_cdeg == NULL) {
+        return false;
+    }
+
+    if (my_app_read_sensor_absolute_cdeg(&sensor_angle_cdeg) == false) {
+        return false;
+    }
+
+    *sensor_yaw_cdeg = my_app_normalize_sensor_yaw_cdeg(sensor_angle_cdeg);
+    return true;
+}
+
+static void my_app_format_angle_deg(int32_t angle_cdeg,
+                                    char *buffer,
+                                    uint16_t buffer_size)
 {
     uint32_t angle_abs_cdeg;
     uint32_t angle_whole_deg;
@@ -267,147 +352,175 @@ static void MyApp_FormatAngleDeg(int32_t angle_cdeg, char *buffer, uint16_t buff
     }
 }
 
-static int32_t MyApp_CalculateMeasuredDeltaCdeg(int32_t start_angle_cdeg,
-                                                 int32_t end_angle_cdeg,
-                                                 int32_t input_angle_cdeg)
+static TMC2209_DirectionTypeDef my_app_get_direction_from_delta(int32_t delta_cdeg)
 {
-    int32_t measured_delta_cdeg = end_angle_cdeg - start_angle_cdeg;
-
-    if ((input_angle_cdeg >= 0) && (measured_delta_cdeg < 0)) {
-        measured_delta_cdeg += MYAPP_FULL_TURN_CDEG;
-    }
-
-    if ((input_angle_cdeg < 0) && (measured_delta_cdeg > 0)) {
-        measured_delta_cdeg -= MYAPP_FULL_TURN_CDEG;
-    }
-
-    return measured_delta_cdeg;
+    return (delta_cdeg >= 0) ? TMC2209_DIR_CW : TMC2209_DIR_CCW;
 }
 
-static TMC2209_DirectionTypeDef MyApp_GetDirectionFromAngle(int32_t angle_cdeg)
+static int32_t my_app_calculate_sensor_delta_cdeg(int32_t start_cdeg,
+                                                  int32_t end_cdeg,
+                                                  int32_t expected_delta_cdeg)
 {
-    return (angle_cdeg >= 0) ? TMC2209_DIR_CW : TMC2209_DIR_CCW;
+    int32_t sensor_delta_cdeg = end_cdeg - start_cdeg;
+
+    if ((expected_delta_cdeg >= 0) && (sensor_delta_cdeg < 0)) {
+        sensor_delta_cdeg += MY_APP_FULL_TURN_CDEG;
+    }
+
+    if ((expected_delta_cdeg < 0) && (sensor_delta_cdeg > 0)) {
+        sensor_delta_cdeg -= MY_APP_FULL_TURN_CDEG;
+    }
+
+    return sensor_delta_cdeg;
 }
 
-static bool MyApp_StartRelativeMove(int32_t input_angle_cdeg)
+static bool my_app_set_zero_from_sensor(void)
 {
-    TMC2209_StatusTypeDef motor_status;
-    uint32_t move_steps;
+    int32_t sensor_angle_cdeg = 0;
 
-    if (MyApp_ReadSensorAngleCdeg(&s_move_context.start_angle_cdeg) == false) {
-        MyApp_USB_SendText("ERR: cannot read start angle\r\n");
+    if (my_app_read_sensor_absolute_cdeg(&sensor_angle_cdeg) == false) {
+        my_app_usb_send_text("ERR: cannot read sensor for zero\r\n");
         return false;
     }
 
-    move_steps = MyApp_CalculateMotorStepsFromAngle(input_angle_cdeg);
-    s_move_context.input_angle_cdeg = input_angle_cdeg;
+    s_sensor_zero_cdeg = sensor_angle_cdeg;
+    s_current_yaw_cdeg = 0;
+    s_app_state = MY_APP_STATE_WAIT_COMMAND;
+    my_app_usb_send_text("zero_ok yaw_deg=0.00\r\n");
+    return true;
+}
+
+static bool my_app_start_target_move(int32_t target_yaw_cdeg)
+{
+    TMC2209_StatusTypeDef motor_status;
+    int32_t move_delta_cdeg;
+    uint32_t move_steps;
+
+    if (my_app_read_sensor_yaw_cdeg(&s_move_context.start_sensor_yaw_cdeg) == false) {
+        my_app_usb_send_text("ERR: cannot read start angle\r\n");
+        return false;
+    }
+
+    move_delta_cdeg = target_yaw_cdeg - s_current_yaw_cdeg;
+    move_steps = my_app_calculate_motor_steps_from_angle(move_delta_cdeg);
+
+    s_move_context.target_yaw_cdeg = target_yaw_cdeg;
+    s_move_context.start_yaw_cdeg = s_current_yaw_cdeg;
+    s_move_context.move_delta_cdeg = move_delta_cdeg;
     s_move_context.target_steps = move_steps;
-    s_move_context.direction = MyApp_GetDirectionFromAngle(input_angle_cdeg);
 
     if (move_steps == 0u) {
-        s_app_state = MYAPP_STATE_WAIT_MOTOR;
+        s_app_state = MY_APP_STATE_WAIT_MOTOR;
         return true;
     }
 
     motor_status = TMC2209_MoveSteps(&motor1,
                                      move_steps,
-                                     s_move_context.direction,
-                                     MYAPP_MOTOR_SPEED_RPM);
+                                     my_app_get_direction_from_delta(move_delta_cdeg),
+                                     MY_APP_MOTOR_SPEED_RPM);
     if (motor_status != TMC2209_OK) {
-        MyApp_USB_SendText("ERR: motor start failed\r\n");
+        my_app_usb_send_text("ERR: motor start failed\r\n");
         return false;
     }
 
-    s_app_state = MYAPP_STATE_WAIT_MOTOR;
+    s_app_state = MY_APP_STATE_WAIT_MOTOR;
     return true;
 }
 
-static void MyApp_ProcessUsbCommand(void)
+static void my_app_process_usb_command(void)
 {
-    uint8_t command_buffer[MYAPP_USB_RX_BUFFER_SIZE];
+    uint8_t command_buffer[MY_APP_USB_RX_BUFFER_SIZE];
     uint16_t command_length = 0u;
-    int32_t input_angle_cdeg = 0;
+    int32_t target_yaw_cdeg = 0;
 
     if (CDC_ReadCommand(command_buffer, sizeof(command_buffer), &command_length) == 0u) {
         return;
     }
 
-    if (MyApp_ParseAngleCdeg(command_buffer, command_length, &input_angle_cdeg) == false) {
-        MyApp_USB_SendText("ERR: input must be angle in degree, example: 90 or -45.50\r\n");
+    if (my_app_is_zero_command(command_buffer, command_length) == true) {
+        (void)my_app_set_zero_from_sensor();
         return;
     }
 
-    if ((input_angle_cdeg > MYAPP_INPUT_MAX_ABS_CDEG) ||
-        (input_angle_cdeg < -MYAPP_INPUT_MAX_ABS_CDEG)) {
-        MyApp_USB_SendText("ERR: input range is -360.00..360.00 deg\r\n");
+    if (my_app_parse_target_angle_cdeg(command_buffer,
+                                       command_length,
+                                       &target_yaw_cdeg) == false) {
+        my_app_usb_send_text("ERR: input must be zero or angle 0.00..360.00 deg\r\n");
         return;
     }
 
-    (void)MyApp_StartRelativeMove(input_angle_cdeg);
+    if ((target_yaw_cdeg < 0) || (target_yaw_cdeg > MY_APP_FULL_TURN_CDEG)) {
+        my_app_usb_send_text("ERR: input range is 0.00..360.00 deg\r\n");
+        return;
+    }
+
+    (void)my_app_start_target_move(target_yaw_cdeg);
 }
 
-static void MyApp_ProcessMotorDone(void)
+static void my_app_process_motor_done(void)
 {
-    int32_t end_angle_cdeg = 0;
-    int32_t measured_delta_cdeg;
+    int32_t end_sensor_yaw_cdeg = 0;
+    int32_t sensor_delta_cdeg;
     int32_t error_cdeg;
     int32_t report_length;
-    char input_angle_deg_text[MYAPP_ANGLE_TEXT_BUFFER_SIZE];
-    char start_angle_deg_text[MYAPP_ANGLE_TEXT_BUFFER_SIZE];
-    char end_angle_deg_text[MYAPP_ANGLE_TEXT_BUFFER_SIZE];
-    char measured_delta_deg_text[MYAPP_ANGLE_TEXT_BUFFER_SIZE];
-    char error_deg_text[MYAPP_ANGLE_TEXT_BUFFER_SIZE];
+    char input_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char start_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char end_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char delta_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char error_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
 
     if (motor1.state == TMC2209_RUNNING) {
         return;
     }
 
-    if (MyApp_ReadSensorAngleCdeg(&end_angle_cdeg) == false) {
-        MyApp_USB_SendText("ERR: cannot read end angle\r\n");
-        s_app_state = MYAPP_STATE_WAIT_COMMAND;
+    if (my_app_read_sensor_yaw_cdeg(&end_sensor_yaw_cdeg) == false) {
+        my_app_usb_send_text("ERR: cannot read end angle\r\n");
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
         return;
     }
 
-    measured_delta_cdeg = MyApp_CalculateMeasuredDeltaCdeg(s_move_context.start_angle_cdeg,
-                                                           end_angle_cdeg,
-                                                           s_move_context.input_angle_cdeg);
-    error_cdeg = s_move_context.input_angle_cdeg - measured_delta_cdeg;
+    sensor_delta_cdeg = my_app_calculate_sensor_delta_cdeg(
+        s_move_context.start_sensor_yaw_cdeg,
+        end_sensor_yaw_cdeg,
+        s_move_context.move_delta_cdeg);
+    error_cdeg = s_move_context.move_delta_cdeg - sensor_delta_cdeg;
+    s_current_yaw_cdeg = s_move_context.target_yaw_cdeg;
 
-    MyApp_FormatAngleDeg(s_move_context.input_angle_cdeg,
-                         input_angle_deg_text,
-                         sizeof(input_angle_deg_text));
-    MyApp_FormatAngleDeg(s_move_context.start_angle_cdeg,
-                         start_angle_deg_text,
-                         sizeof(start_angle_deg_text));
-    MyApp_FormatAngleDeg(end_angle_cdeg,
-                         end_angle_deg_text,
-                         sizeof(end_angle_deg_text));
-    MyApp_FormatAngleDeg(measured_delta_cdeg,
-                         measured_delta_deg_text,
-                         sizeof(measured_delta_deg_text));
-    MyApp_FormatAngleDeg(error_cdeg,
-                         error_deg_text,
-                         sizeof(error_deg_text));
+    my_app_format_angle_deg(s_move_context.target_yaw_cdeg,
+                            input_angle_text,
+                            sizeof(input_angle_text));
+    my_app_format_angle_deg(s_move_context.start_sensor_yaw_cdeg,
+                            start_angle_text,
+                            sizeof(start_angle_text));
+    my_app_format_angle_deg(end_sensor_yaw_cdeg,
+                            end_angle_text,
+                            sizeof(end_angle_text));
+    my_app_format_angle_deg(sensor_delta_cdeg,
+                            delta_angle_text,
+                            sizeof(delta_angle_text));
+    my_app_format_angle_deg(error_cdeg,
+                            error_angle_text,
+                            sizeof(error_angle_text));
 
     report_length = snprintf(s_usb_tx_buffer,
                              sizeof(s_usb_tx_buffer),
                              "input_deg=%s,start_deg=%s,end_deg=%s,"
                              "delta_deg=%s,error_deg=%s,steps=%lu\r\n",
-                             input_angle_deg_text,
-                             start_angle_deg_text,
-                             end_angle_deg_text,
-                             measured_delta_deg_text,
-                             error_deg_text,
+                             input_angle_text,
+                             start_angle_text,
+                             end_angle_text,
+                             delta_angle_text,
+                             error_angle_text,
                              (unsigned long)s_move_context.target_steps);
 
     if ((report_length > 0) && (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
         (void)CDC_Transmit_FS((uint8_t *)s_usb_tx_buffer, (uint16_t)report_length);
     }
 
-    s_app_state = MYAPP_STATE_WAIT_COMMAND;
+    s_app_state = MY_APP_STATE_WAIT_COMMAND;
 }
 
-void Motors_Config(void)
+void motors_config(void)
 {
     motor1.id             = 0u;
     motor1.htim           = &htim2;
@@ -449,9 +562,9 @@ void Motors_Config(void)
     motor3.slave_address  = TMC2209_SLAVE_ADD3;
 }
 
-void Motors_Init(void)
+void motors_init(void)
 {
-    Motors_Config();
+    motors_config();
 
     (void)TMC2209_Init(&motor1);
     (void)TMC2209_Init(&motor2);
@@ -462,22 +575,24 @@ void Motors_Init(void)
     (void)TMC2209_SetStealthChop(&motor3, true);
 }
 
-void MyApp_SensorUsb_Init(void)
+void my_app_init(void)
 {
-    Motors_Init();
+    motors_init();
 
-    s_mux.i2c_write = MyApp_I2C_Write;
-    s_mux.i2c_read = MyApp_I2C_Read;
-    s_mux.delay_ms = MyApp_DelayMs;
+    s_mux.i2c_write = my_app_i2c_write;
+    s_mux.i2c_read = my_app_i2c_read;
+    s_mux.delay_ms = my_app_delay_ms;
     s_is_sensor_ready = false;
     s_has_init_error_been_reported = false;
-    s_app_state = MYAPP_STATE_WAIT_COMMAND;
+    s_app_state = MY_APP_STATE_WAIT_COMMAND;
+    s_sensor_zero_cdeg = 0;
+    s_current_yaw_cdeg = 0;
 
     if (TCA9548A_Init(&s_mux, TCA9548A_ADDR_A000) != TCA9548A_OK) {
         return;
     }
 
-    if (TCA9548A_RegisterSensor(&s_mux, MYAPP_SENSOR_CHANNEL, "AS5600_CH0") != TCA9548A_OK) {
+    if (TCA9548A_RegisterSensor(&s_mux, MY_APP_SENSOR_CHANNEL, "AS5600_CH0") != TCA9548A_OK) {
         return;
     }
 
@@ -486,50 +601,40 @@ void MyApp_SensorUsb_Init(void)
     }
 
     s_is_sensor_ready = true;
+    (void)my_app_set_zero_from_sensor();
 }
 
-uint16_t MyApp_ScaleAngleTo4000(uint16_t angle_raw)
-{
-    return (uint16_t)((((uint32_t)angle_raw & 0x0fffu) * MYAPP_ANGLE_SCALE_STEPS) /
-                      MYAPP_AS5600_RAW_STEPS);
-}
-
-uint32_t MyApp_CalculateMotorStepsFromAngle(int32_t angle_cdeg)
+uint32_t my_app_calculate_motor_steps_from_angle(int32_t angle_cdeg)
 {
     uint32_t angle_abs_cdeg;
-    uint32_t steps_per_turn;
+    uint32_t scaled_steps_per_turn;
 
     angle_abs_cdeg = (angle_cdeg < 0) ? (uint32_t)(-angle_cdeg) : (uint32_t)angle_cdeg;
-    steps_per_turn = (uint32_t)(((uint64_t)motor1.steps_per_rev *
-                                 (uint64_t)motor1.microstep *
-                                 (uint64_t)MYAPP_STEP_SCALE_NUMERATOR) /
-                                (uint64_t)MYAPP_STEP_SCALE_DENOMINATOR);
+    scaled_steps_per_turn = (uint32_t)((uint64_t)motor1.steps_per_rev * (uint64_t)motor1.microstep); // * (uint64_t)MY_APP_STEP_SCALE_NUMERATOR) / (uint64_t)MY_APP_STEP_SCALE_DENOMINATOR
 
-    return (uint32_t)(((uint64_t)angle_abs_cdeg * steps_per_turn +
-                       ((uint64_t)MYAPP_FULL_TURN_CDEG / 2u)) /
-                      (uint64_t)MYAPP_FULL_TURN_CDEG);
+    return (uint32_t)(((uint64_t)angle_abs_cdeg * scaled_steps_per_turn + ((uint64_t)MY_APP_FULL_TURN_CDEG / 2u)) / (uint64_t)MY_APP_FULL_TURN_CDEG);
 }
 
-void My_app(void)
+void my_app_process(void)
 {
-    if (MyApp_USB_IsReady() == false) {
+    if (my_app_usb_is_ready() == false) {
         return;
     }
 
     if (s_is_sensor_ready == false) {
         if (s_has_init_error_been_reported == false) {
-            MyApp_USB_SendText("ERR: AS5600 init failed\r\n");
+            my_app_usb_send_text("ERR: AS5600 init failed\r\n");
             s_has_init_error_been_reported = true;
         }
         return;
     }
 
-    if (s_app_state == MYAPP_STATE_WAIT_COMMAND) {
-        MyApp_ProcessUsbCommand();
+    if (s_app_state == MY_APP_STATE_WAIT_COMMAND) {
+        my_app_process_usb_command();
         return;
     }
 
-    MyApp_ProcessMotorDone();
+    my_app_process_motor_done();
 }
 
 void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)

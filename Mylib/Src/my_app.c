@@ -38,12 +38,22 @@ TMC2209_HandleTypeDef motor3;
 #define MY_APP_AS5600_RAW_STEPS            4096u
 /** Một vòng đầy đủ biểu diễn bằng centi-độ. */
 #define MY_APP_FULL_TURN_CDEG              36000l
+/** Nửa vòng quay dùng để chọn sai lệch góc ngắn nhất. */
+#define MY_APP_HALF_TURN_CDEG              18000l
 /** Tốc độ động cơ mặc định khi chạy tới góc mục tiêu. */
 #define MY_APP_MOTOR_SPEED_RPM             60.0f
 /** Tử số tùy chọn cho hệ số scale bước cơ khí. */
 #define MY_APP_STEP_SCALE_NUMERATOR        9u
 /** Mẫu số tùy chọn cho hệ số scale bước cơ khí. */
 #define MY_APP_STEP_SCALE_DENOMINATOR      2u
+/** Nhiễu quá trình Kalman, càng lớn thì bộ lọc càng bám nhanh theo góc thật. */
+#define MY_APP_KALMAN_PROCESS_NOISE        4.0f
+/** Nhiễu đo Kalman, càng lớn thì bộ lọc càng giảm rung mạnh hơn. */
+#define MY_APP_KALMAN_MEASUREMENT_NOISE    64.0f
+/** Hiệp phương sai ban đầu giúp mẫu đầu tiên được tin cậy nhanh. */
+#define MY_APP_KALMAN_INITIAL_COVARIANCE   1000.0f
+/** Ngưỡng đổi góc thật để tránh Kalman làm trễ sau khi motor vừa di chuyển. */
+#define MY_APP_KALMAN_FAST_TRACK_CDEG      1000.0f
 
 /**
  * @brief  Các trạng thái chính của máy trạng thái ứng dụng.
@@ -64,6 +74,17 @@ typedef struct {
     uint32_t target_steps;          /**< Số microstep motor cần chạy. */
 } my_app_move_context_t;
 
+/**
+ * @brief  Trạng thái bộ lọc Kalman 1 chiều cho góc tuyệt đối AS5600.
+ */
+typedef struct {
+    float estimate_cdeg;             /**< Góc ước lượng hiện tại, tính bằng centi-độ. */
+    float error_covariance;          /**< Độ không chắc chắn của giá trị ước lượng. */
+    float process_noise;             /**< Nhiễu mô hình giữa hai lần lấy mẫu liên tiếp. */
+    float measurement_noise;         /**< Nhiễu đo của mẫu AS5600 đọc từ I2C. */
+    bool is_initialized;             /**< Cờ cho biết bộ lọc đã nhận mẫu đầu tiên. */
+} my_app_kalman_filter_t;
+
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
 /** Instance mux TCA9548A dùng để truy cập kênh cảm biến AS5600. */
@@ -82,6 +103,8 @@ static bool s_has_init_error_been_reported = false;
 static int32_t s_sensor_zero_cdeg = 0;
 /** Góc yaw mục tiêu cuối cùng được phần mềm chấp nhận, tính bằng centi-độ. */
 static int32_t s_current_yaw_cdeg = 0;
+/** Bộ lọc Kalman làm mượt góc tuyệt đối AS5600 trước khi tính yaw. */
+static my_app_kalman_filter_t s_sensor_kalman_filter;
 /** Bộ đệm truyền USB dùng chung cho các dòng report đã định dạng. */
 static char s_usb_tx_buffer[MY_APP_USB_TX_BUFFER_SIZE];
 
@@ -101,6 +124,12 @@ static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length);
 static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
                                            uint16_t length,
                                            int32_t *target_angle_cdeg);
+static void my_app_kalman_reset(my_app_kalman_filter_t *filter);
+static int32_t my_app_normalize_absolute_cdeg(int32_t angle_cdeg);
+static float my_app_calculate_shortest_angle_error_cdeg(float reference_cdeg,
+                                                        int32_t sample_cdeg);
+static int32_t my_app_kalman_update(my_app_kalman_filter_t *filter,
+                                    int32_t sample_cdeg);
 static int32_t my_app_normalize_sensor_yaw_cdeg(int32_t sensor_angle_cdeg);
 static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg);
 static bool my_app_read_sensor_yaw_cdeg(int32_t *sensor_yaw_cdeg);
@@ -374,6 +403,123 @@ static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
 }
 
 /**
+ * @brief  Đưa bộ lọc Kalman về trạng thái chưa có mẫu đo.
+ * @param  filter: Con trỏ tới trạng thái bộ lọc cần reset.
+ * @note   Reset giúp lần đọc đầu tiên sau khi init bám trực tiếp vào cảm biến,
+ *         tránh dùng lại ước lượng cũ từ một phiên chạy trước.
+ */
+static void my_app_kalman_reset(my_app_kalman_filter_t *filter)
+{
+    if (filter == NULL) {
+        return;
+    }
+
+    filter->estimate_cdeg = 0.0f;
+    filter->error_covariance = MY_APP_KALMAN_INITIAL_COVARIANCE;
+    filter->process_noise = MY_APP_KALMAN_PROCESS_NOISE;
+    filter->measurement_noise = MY_APP_KALMAN_MEASUREMENT_NOISE;
+    filter->is_initialized = false;
+}
+
+/**
+ * @brief  Chuẩn hóa góc tuyệt đối về miền 0.00 tới nhỏ hơn 360.00 độ.
+ * @param  angle_cdeg: Góc cần chuẩn hóa, tính bằng centi-độ.
+ * @return Góc đã chuẩn hóa, tính bằng centi-độ.
+ */
+static int32_t my_app_normalize_absolute_cdeg(int32_t angle_cdeg)
+{
+    while (angle_cdeg < 0) {
+        angle_cdeg += MY_APP_FULL_TURN_CDEG;
+    }
+
+    while (angle_cdeg >= MY_APP_FULL_TURN_CDEG) {
+        angle_cdeg -= MY_APP_FULL_TURN_CDEG;
+    }
+
+    return angle_cdeg;
+}
+
+/**
+ * @brief  Tính sai lệch góc ngắn nhất giữa ước lượng và mẫu đo mới.
+ * @param  reference_cdeg: Góc ước lượng hiện tại, tính bằng centi-độ.
+ * @param  sample_cdeg: Mẫu đo mới đã chuẩn hóa, tính bằng centi-độ.
+ * @return Sai lệch có dấu trong khoảng -180.00 tới +180.00 độ.
+ * @note   Cách tính này giữ Kalman ổn định khi AS5600 đi qua mốc 0/360 độ.
+ */
+static float my_app_calculate_shortest_angle_error_cdeg(float reference_cdeg,
+                                                        int32_t sample_cdeg)
+{
+    float error_cdeg = (float)sample_cdeg - reference_cdeg;
+
+    while (error_cdeg > (float)MY_APP_HALF_TURN_CDEG) {
+        error_cdeg -= (float)MY_APP_FULL_TURN_CDEG;
+    }
+
+    while (error_cdeg < (float)-MY_APP_HALF_TURN_CDEG) {
+        error_cdeg += (float)MY_APP_FULL_TURN_CDEG;
+    }
+
+    return error_cdeg;
+}
+
+/**
+ * @brief  Cập nhật bộ lọc Kalman từ một mẫu góc tuyệt đối AS5600.
+ * @param  filter: Con trỏ tới trạng thái bộ lọc Kalman.
+ * @param  sample_cdeg: Mẫu đo góc tuyệt đối, tính bằng centi-độ.
+ * @return Góc tuyệt đối đã lọc, tính bằng centi-độ.
+ */
+static int32_t my_app_kalman_update(my_app_kalman_filter_t *filter,
+                                    int32_t sample_cdeg)
+{
+    float kalman_gain;
+    float innovation_cdeg;
+
+    sample_cdeg = my_app_normalize_absolute_cdeg(sample_cdeg);
+
+    if (filter == NULL) {
+        return sample_cdeg;
+    }
+
+    if (filter->is_initialized == false) {
+        filter->estimate_cdeg = (float)sample_cdeg;
+        filter->error_covariance = MY_APP_KALMAN_INITIAL_COVARIANCE;
+        filter->is_initialized = true;
+        return sample_cdeg;
+    }
+
+    filter->error_covariance += filter->process_noise;
+    innovation_cdeg = my_app_calculate_shortest_angle_error_cdeg(
+        filter->estimate_cdeg,
+        sample_cdeg);
+
+    /*
+     * Khi motor vừa chạy xong, góc thật có thể đổi lớn giữa hai lần lấy mẫu.
+     * Trường hợp này cần bám nhanh vào mẫu mới để Kalman không tạo sai số trễ.
+     */
+    if ((innovation_cdeg > MY_APP_KALMAN_FAST_TRACK_CDEG) ||
+        (innovation_cdeg < -MY_APP_KALMAN_FAST_TRACK_CDEG)) {
+        filter->estimate_cdeg = (float)sample_cdeg;
+        filter->error_covariance = MY_APP_KALMAN_INITIAL_COVARIANCE;
+        return sample_cdeg;
+    }
+
+    kalman_gain = filter->error_covariance /
+                  (filter->error_covariance + filter->measurement_noise);
+    filter->estimate_cdeg += kalman_gain * innovation_cdeg;
+    filter->error_covariance *= (1.0f - kalman_gain);
+
+    while (filter->estimate_cdeg < 0.0f) {
+        filter->estimate_cdeg += (float)MY_APP_FULL_TURN_CDEG;
+    }
+
+    while (filter->estimate_cdeg >= (float)MY_APP_FULL_TURN_CDEG) {
+        filter->estimate_cdeg -= (float)MY_APP_FULL_TURN_CDEG;
+    }
+
+    return (int32_t)(filter->estimate_cdeg + 0.5f);
+}
+
+/**
  * @brief  Chuẩn hóa góc tuyệt đối AS5600 thành yaw so với zero phần mềm.
  * @param  sensor_angle_cdeg: Góc cảm biến tuyệt đối, tính bằng centi-độ.
  * @return Góc yaw trong khoảng từ 0.00 tới nhỏ hơn 360.00 độ.
@@ -404,6 +550,8 @@ static int32_t my_app_normalize_sensor_yaw_cdeg(int32_t sensor_angle_cdeg)
  */
 static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg)
 {
+    int32_t raw_angle_cdeg;
+
     if (sensor_angle_cdeg == NULL) {
         return false;
     }
@@ -416,9 +564,12 @@ static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg)
      * AS5600 trả về 12-bit raw 0..4095. Nhân trước rồi chia sau để giữ độ
      * phân giải khi chuyển sang centi-độ bằng số nguyên.
      */
-    *sensor_angle_cdeg = (int32_t)(((uint64_t)s_as5600_data.angle *
-                                    (uint64_t)MY_APP_FULL_TURN_CDEG) /
-                                   (uint64_t)MY_APP_AS5600_RAW_STEPS);
+    raw_angle_cdeg = (int32_t)(((uint64_t)s_as5600_data.angle *
+                                (uint64_t)MY_APP_FULL_TURN_CDEG) /
+                               (uint64_t)MY_APP_AS5600_RAW_STEPS);
+
+    *sensor_angle_cdeg = my_app_kalman_update(&s_sensor_kalman_filter,
+                                              raw_angle_cdeg);
     return true;
 }
 
@@ -780,6 +931,7 @@ void my_app_init(void)
     s_app_state = MY_APP_STATE_WAIT_COMMAND;
     s_sensor_zero_cdeg = 0;
     s_current_yaw_cdeg = 0;
+    my_app_kalman_reset(&s_sensor_kalman_filter);
 
     if (TCA9548A_Init(&s_mux, TCA9548A_ADDR_A000) != TCA9548A_OK) {
         return;

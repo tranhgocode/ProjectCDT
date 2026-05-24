@@ -16,30 +16,30 @@ extern TMC2209_HandleTypeDef motor2;
 extern TMC2209_HandleTypeDef motor3;
 
 /**
- * @brief  Configure motor handles with timer, GPIO, and TMC2209 addresses.
+ * @brief  Cấu hình handle motor với timer, GPIO và địa chỉ TMC2209.
  */
 void motors_config(void);
 
 /**
- * @brief  Initialize all configured TMC2209 motor drivers.
+ * @brief  Khởi tạo tất cả driver TMC2209 đã được cấu hình.
  */
 void motors_init(void);
 
 /**
- * @brief  Initialize motor, AS5600 sensor path, USB command state, and yaw zero.
+ * @brief  Khởi tạo motor, đường cảm biến AS5600, trạng thái USB và yaw zero.
  */
 void my_app_init(void);
 
 /**
- * @brief  Calculate motor microsteps required for a relative yaw delta.
+ * @brief  Tính số microstep motor cần dùng cho một delta yaw tương đối.
  *
- * @param  angle_cdeg: Relative yaw delta in centidegrees.
- * @return Number of motor microsteps to move.
+ * @param  angle_cdeg: Delta yaw tương đối, tính bằng centi-độ.
+ * @return Số microstep motor cần chạy.
  */
 uint32_t my_app_calculate_motor_steps_from_angle(int32_t angle_cdeg);
 
 /**
- * @brief  Main application task. Call repeatedly from the main loop.
+ * @brief  Chạy tác vụ ứng dụng chính, cần gọi lặp lại trong vòng lặp main.
  */
 void my_app_process(void);
 

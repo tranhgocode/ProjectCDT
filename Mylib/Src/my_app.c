@@ -54,6 +54,7 @@ TMC2209_HandleTypeDef motor3;
 #define MY_APP_KALMAN_INITIAL_COVARIANCE   1000.0f
 /** Ngưỡng đổi góc thật để tránh Kalman làm trễ sau khi motor vừa di chuyển. */
 #define MY_APP_KALMAN_FAST_TRACK_CDEG      1000.0f
+#define MY_APP_USE_KALMAN_FILTER           0        /* Set to 0 để bỏ qua kalman filter */
 
 /**
  * @brief  Các trạng thái chính của máy trạng thái ứng dụng.
@@ -126,10 +127,12 @@ static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
                                            int32_t *target_angle_cdeg);
 static void my_app_kalman_reset(my_app_kalman_filter_t *filter);
 static int32_t my_app_normalize_absolute_cdeg(int32_t angle_cdeg);
+#if (MY_APP_USE_KALMAN_FILTER != 0)
 static float my_app_calculate_shortest_angle_error_cdeg(float reference_cdeg,
                                                         int32_t sample_cdeg);
 static int32_t my_app_kalman_update(my_app_kalman_filter_t *filter,
                                     int32_t sample_cdeg);
+#endif
 static int32_t my_app_normalize_sensor_yaw_cdeg(int32_t sensor_angle_cdeg);
 static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg);
 static bool my_app_read_sensor_yaw_cdeg(int32_t *sensor_yaw_cdeg);
@@ -446,6 +449,7 @@ static int32_t my_app_normalize_absolute_cdeg(int32_t angle_cdeg)
  * @return Sai lệch có dấu trong khoảng -180.00 tới +180.00 độ.
  * @note   Cách tính này giữ Kalman ổn định khi AS5600 đi qua mốc 0/360 độ.
  */
+#if (MY_APP_USE_KALMAN_FILTER != 0)
 static float my_app_calculate_shortest_angle_error_cdeg(float reference_cdeg,
                                                         int32_t sample_cdeg)
 {
@@ -518,6 +522,7 @@ static int32_t my_app_kalman_update(my_app_kalman_filter_t *filter,
 
     return (int32_t)(filter->estimate_cdeg + 0.5f);
 }
+#endif
 
 /**
  * @brief  Chuẩn hóa góc tuyệt đối AS5600 thành yaw so với zero phần mềm.
@@ -568,8 +573,12 @@ static bool my_app_read_sensor_absolute_cdeg(int32_t *sensor_angle_cdeg)
                                 (uint64_t)MY_APP_FULL_TURN_CDEG) /
                                (uint64_t)MY_APP_AS5600_RAW_STEPS);
 
+#if (MY_APP_USE_KALMAN_FILTER != 0)
     *sensor_angle_cdeg = my_app_kalman_update(&s_sensor_kalman_filter,
                                               raw_angle_cdeg);
+#else
+    *sensor_angle_cdeg = my_app_normalize_absolute_cdeg(raw_angle_cdeg);
+#endif
     return true;
 }
 

@@ -1,13 +1,162 @@
-/*
- * my_controller.h
- *
- *  Created on: May 14, 2026
- *      Author: Lap4all
+/**
+ * @file    my_controller.h
+ * @brief   Giao diện điều khiển motor yaw và cảm biến góc AS5600.
+ * @author  Lap4all
+ * @date    2026-05-14
  */
 
 #ifndef MYLIB_INC_MY_CONTROLLER_H_
 #define MYLIB_INC_MY_CONTROLLER_H_
 
+#include "TMC2209.h"
+#include <stdbool.h>
+#include <stdint.h>
 
+/** @brief Một vòng quay, tính bằng centi-độ. */
+#define MY_CONTROLLER_FULL_TURN_CDEG    36000L
+
+extern TMC2209_HandleTypeDef motor1; /**< Driver TMC2209 thứ nhất. */
+extern TMC2209_HandleTypeDef motor2; /**< Driver TMC2209 thứ hai. */
+extern TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
+
+/**
+ * @brief  Mã trạng thái của module điều khiển yaw.
+ */
+typedef enum {
+    MY_CONTROLLER_OK = 0,              /**< Thao tác thành công. */
+    MY_CONTROLLER_ERR_NULL_PTR = -1,   /**< Tham số con trỏ không hợp lệ. */
+    MY_CONTROLLER_ERR_SENSOR = -2,     /**< Lỗi đọc hoặc init AS5600. */
+    MY_CONTROLLER_ERR_MOTOR = -3,      /**< TMC2209 không nhận lệnh chạy. */
+} MyController_Status_t;
+
+/**
+ * @brief  Ngữ cảnh được lưu từ lúc bắt đầu tới khi hoàn tất một lệnh yaw.
+ */
+typedef struct {
+    int32_t target_yaw_cdeg;        /**< Góc yaw mục tiêu, centi-độ. */
+    int32_t start_yaw_cdeg;         /**< Góc yaw phần mềm trước khi chạy. */
+    int32_t move_delta_cdeg;        /**< Góc chạy tương đối đã ra lệnh. */
+    int32_t start_sensor_yaw_cdeg;  /**< Yaw cảm biến trước khi chạy. */
+    uint32_t target_steps;          /**< Số microstep motor cần chạy. */
+} MyController_MoveContext_t;
+
+/**
+ * @brief  Kết quả đo sau khi một lệnh yaw hoàn tất.
+ */
+typedef struct {
+    int32_t end_sensor_yaw_cdeg;    /**< Góc yaw cảm biến sau khi motor dừng. */
+    int32_t sensor_delta_cdeg;      /**< Delta yaw cảm biến đo được. */
+    int32_t error_cdeg;             /**< Sai số lệnh yaw và cảm biến. */
+} MyController_MoveResult_t;
+
+/**
+ * @brief  Lệnh chạy đồng thời ba motor theo góc tương đối.
+ */
+typedef struct {
+    int32_t motor1_angle_cdeg;      /**< Góc motor1 cần chạy, centi-độ. */
+    int32_t motor2_angle_cdeg;      /**< Góc motor2 cần chạy, centi-độ. */
+    int32_t motor3_angle_cdeg;      /**< Góc motor3 cần chạy, centi-độ. */
+} MyController_ThreeMotorMoveCommand_t;
+
+/**
+ * @brief  Ngữ cảnh lệnh chạy đồng thời ba motor.
+ */
+typedef struct {
+    int32_t motor1_angle_cdeg;      /**< Góc đã nhận cho motor1, centi-độ. */
+    int32_t motor2_angle_cdeg;      /**< Góc đã nhận cho motor2, centi-độ. */
+    int32_t motor3_angle_cdeg;      /**< Góc đã nhận cho motor3, centi-độ. */
+    uint32_t motor1_target_steps;   /**< Số microstep motor1 cần chạy. */
+    uint32_t motor2_target_steps;   /**< Số microstep motor2 cần chạy. */
+    uint32_t motor3_target_steps;   /**< Số microstep motor3 cần chạy. */
+} MyController_ThreeMotorMoveContext_t;
+
+/**
+ * @brief  Cấu hình handle cho các driver TMC2209.
+ */
+void MyController_MotorsConfig(void);
+
+/**
+ * @brief  Khởi tạo các driver TMC2209 đã cấu hình.
+ */
+void MyController_MotorsInit(void);
+
+/**
+ * @brief  Khởi tạo motor, mux TCA9548A và AS5600 dùng cho yaw.
+ * @return MY_CONTROLLER_OK nếu toàn bộ đường điều khiển sẵn sàng.
+ */
+MyController_Status_t MyController_Init(void);
+
+/**
+ * @brief  Đặt góc AS5600 hiện tại làm mốc yaw zero phần mềm.
+ * @return MY_CONTROLLER_OK nếu đọc cảm biến và cập nhật zero thành công.
+ */
+MyController_Status_t MyController_SetZeroFromSensor(void);
+
+/**
+ * @brief  Đọc góc tuyệt đối của AS5600 theo centi-độ.
+ * @param  sensor_angle_cdeg: Nơi lưu góc tuyệt đối, tính bằng centi-độ.
+ * @return MY_CONTROLLER_OK nếu đọc cảm biến thành công.
+ */
+MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
+    int32_t *sensor_angle_cdeg);
+
+/**
+ * @brief  Đọc yaw hiện tại theo mốc zero phần mềm.
+ * @param  sensor_yaw_cdeg: Nơi lưu yaw hiện tại, tính bằng centi-độ.
+ * @return MY_CONTROLLER_OK nếu đọc cảm biến thành công.
+ */
+MyController_Status_t MyController_ReadSensorYawCdeg(
+    int32_t *sensor_yaw_cdeg);
+
+/**
+ * @brief  Bắt đầu chạy motor yaw tới góc mục tiêu.
+ * @param  target_yaw_cdeg: Góc yaw mục tiêu tuyệt đối, tính bằng centi-độ.
+ * @param  context: Nơi lưu dữ liệu cần dùng khi kết thúc lệnh chạy.
+ * @return MY_CONTROLLER_OK nếu lệnh được chấp nhận.
+ */
+MyController_Status_t MyController_StartTargetMove(
+    int32_t target_yaw_cdeg,
+    MyController_MoveContext_t *context);
+
+/**
+ * @brief  Bắt đầu chạy đồng thời ba motor theo ba góc nhập từ USB CDC.
+ * @param  command: Ba góc tương đối cần chạy, tính bằng centi-độ.
+ * @param  context: Nơi lưu số bước đã phát lệnh cho từng motor.
+ * @return MY_CONTROLLER_OK nếu lệnh được chấp nhận.
+ * @note   Chiều cơ khí được cố định trong module controller để lệnh USB chỉ
+ *         cần nhập ba độ lớn chuyển động.
+ */
+MyController_Status_t MyController_StartThreeMotorMove(
+    const MyController_ThreeMotorMoveCommand_t *command,
+    MyController_ThreeMotorMoveContext_t *context);
+
+/**
+ * @brief  Kiểm tra motor yaw chính còn đang chạy hay không.
+ * @return true nếu motor yaw chính đang chạy, ngược lại false.
+ */
+bool MyController_IsTargetMotorRunning(void);
+
+/**
+ * @brief  Kiểm tra còn motor nào trong nhóm ba motor đang chạy hay không.
+ * @return true nếu ít nhất một motor chưa hoàn tất lệnh.
+ */
+bool MyController_IsThreeMotorMoveRunning(void);
+
+/**
+ * @brief  Hoàn tất lệnh yaw và tính sai số dựa trên AS5600.
+ * @param  context: Ngữ cảnh đã lưu khi bắt đầu lệnh chạy.
+ * @param  result: Nơi lưu kết quả đo sau khi motor dừng.
+ * @return MY_CONTROLLER_OK nếu đọc được góc cuối và cập nhật yaw phần mềm.
+ */
+MyController_Status_t MyController_FinishTargetMove(
+    const MyController_MoveContext_t *context,
+    MyController_MoveResult_t *result);
+
+/**
+ * @brief  Chuyển delta yaw tương đối sang số microstep của motor yaw.
+ * @param  angle_cdeg: Delta yaw tương đối, tính bằng centi-độ.
+ * @return Số microstep đã làm tròn cần dùng cho chuyển động.
+ */
+uint32_t MyController_CalculateMotorStepsFromAngle(int32_t angle_cdeg);
 
 #endif /* MYLIB_INC_MY_CONTROLLER_H_ */

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    my_app.c
  * @brief   Tầng ứng dụng xử lý lệnh USB CDC, phản hồi yaw từ AS5600 và
  *          điều khiển chuyển động động cơ bước TMC2209.
@@ -17,44 +17,26 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/** Handle công khai cho driver TMC2209 thứ nhất. */
-TMC2209_HandleTypeDef motor1;
-/** Handle công khai cho driver TMC2209 thứ hai. */
-TMC2209_HandleTypeDef motor2;
-/** Handle công khai cho driver TMC2209 thứ ba. */
-TMC2209_HandleTypeDef motor3;
+TMC2209_HandleTypeDef motor1;             /**< Handle công khai cho driver TMC2209 thứ nhất. */
+TMC2209_HandleTypeDef motor2;             /**< Handle công khai cho driver TMC2209 thứ hai. */
+TMC2209_HandleTypeDef motor3;             /**< Handle công khai cho driver TMC2209 thứ ba. */
 
-/** Kênh AS5600 được chọn qua bộ ghép kênh TCA9548A. */
-#define MY_APP_SENSOR_CHANNEL              TCA9548A_CH0
-/** Thời gian timeout cho giao dịch I2C của AS5600 và TCA9548A. */
-#define MY_APP_I2C_TIMEOUT_MS              20u
-/** Kích thước bộ đệm tạm truyền USB CDC, tính bằng byte. */
-#define MY_APP_USB_TX_BUFFER_SIZE          192u
-/** Kích thước bộ đệm nhận lệnh USB CDC, tính bằng byte. */
-#define MY_APP_USB_RX_BUFFER_SIZE          64u
-/** Kích thước bộ đệm chuỗi cho một trường góc đã định dạng. */
-#define MY_APP_ANGLE_TEXT_BUFFER_SIZE      16u
-/** Số vị trí raw AS5600 trong một vòng cơ khí. */
-#define MY_APP_AS5600_RAW_STEPS            4096u
-/** Một vòng đầy đủ biểu diễn bằng centi-độ. */
-#define MY_APP_FULL_TURN_CDEG              36000l
-/** Nửa vòng quay dùng để chọn sai lệch góc ngắn nhất. */
-#define MY_APP_HALF_TURN_CDEG              18000l
-/** Tốc độ động cơ mặc định khi chạy tới góc mục tiêu. */
-#define MY_APP_MOTOR_SPEED_RPM             60.0f
-/** Tử số tùy chọn cho hệ số scale bước cơ khí. */
-#define MY_APP_STEP_SCALE_NUMERATOR        9u
-/** Mẫu số tùy chọn cho hệ số scale bước cơ khí. */
-#define MY_APP_STEP_SCALE_DENOMINATOR      2u
-/** Nhiễu quá trình Kalman, càng lớn thì bộ lọc càng bám nhanh theo góc thật. */
-#define MY_APP_KALMAN_PROCESS_NOISE        4.0f
-/** Nhiễu đo Kalman, càng lớn thì bộ lọc càng giảm rung mạnh hơn. */
-#define MY_APP_KALMAN_MEASUREMENT_NOISE    64.0f
-/** Hiệp phương sai ban đầu giúp mẫu đầu tiên được tin cậy nhanh. */
-#define MY_APP_KALMAN_INITIAL_COVARIANCE   1000.0f
-/** Ngưỡng đổi góc thật để tránh Kalman làm trễ sau khi motor vừa di chuyển. */
-#define MY_APP_KALMAN_FAST_TRACK_CDEG      1000.0f
-#define MY_APP_USE_KALMAN_FILTER           0        /* Set to 0 để bỏ qua kalman filter */
+#define MY_APP_SENSOR_CHANNEL              TCA9548A_CH0    /**< Kênh AS5600 được chọn qua bộ ghép kênh TCA9548A. */
+#define MY_APP_I2C_TIMEOUT_MS              20u             /**< Thời gian timeout cho giao dịch I2C của AS5600 và TCA9548A. */
+#define MY_APP_USB_TX_BUFFER_SIZE          192u            /**< Kích thước bộ đệm tạm truyền USB CDC, tính bằng byte. */
+#define MY_APP_USB_RX_BUFFER_SIZE          64u             /**< Kích thước bộ đệm nhận lệnh USB CDC, tính bằng byte. */
+#define MY_APP_ANGLE_TEXT_BUFFER_SIZE      16u             /**< Kích thước bộ đệm chuỗi cho một trường góc đã định dạng. */
+#define MY_APP_AS5600_RAW_STEPS            4096u           /**< Số vị trí raw AS5600 trong một vòng cơ khí. */
+#define MY_APP_FULL_TURN_CDEG              36000l          /**< Một vòng đầy đủ biểu diễn bằng centi-độ. */
+#define MY_APP_HALF_TURN_CDEG              18000l          /**< Nửa vòng quay dùng để chọn sai lệch góc ngắn nhất. */
+#define MY_APP_MOTOR_SPEED_RPM             60.0f           /**< Tốc độ động cơ mặc định khi chạy tới góc mục tiêu. */
+#define MY_APP_STEP_SCALE_NUMERATOR        9u              /**< Tử số tùy chọn cho hệ số scale bước cơ khí. */
+#define MY_APP_STEP_SCALE_DENOMINATOR      2u              /**< Mẫu số tùy chọn cho hệ số scale bước cơ khí. */
+#define MY_APP_KALMAN_PROCESS_NOISE        4.0f            /**< Nhiễu quá trình Kalman, càng lớn thì bộ lọc càng bám nhanh theo góc thật. */
+#define MY_APP_KALMAN_MEASUREMENT_NOISE    64.0f           /**< Nhiễu đo Kalman, càng lớn thì bộ lọc càng giảm rung mạnh hơn. */
+#define MY_APP_KALMAN_INITIAL_COVARIANCE   1000.0f         /**< Hiệp phương sai ban đầu giúp mẫu đầu tiên được tin cậy nhanh. */
+#define MY_APP_KALMAN_FAST_TRACK_CDEG      1000.0f         /**< Ngưỡng đổi góc thật để tránh Kalman làm trễ sau khi motor vừa di chuyển. */
+#define MY_APP_USE_KALMAN_FILTER           0               /**< Đặt bằng 0 để bỏ qua bộ lọc Kalman. */
 
 /**
  * @brief  Các trạng thái chính của máy trạng thái ứng dụng.
@@ -88,26 +70,16 @@ typedef struct {
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
-/** Instance mux TCA9548A dùng để truy cập kênh cảm biến AS5600. */
-static TCA9548A_Handle_t s_mux;
-/** Mẫu dữ liệu AS5600 mới nhất đọc qua mux. */
-static AS5600_Data_t s_as5600_data;
-/** Trạng thái hiện tại của máy trạng thái lệnh/chuyển động. */
-static my_app_state_t s_app_state = MY_APP_STATE_WAIT_COMMAND;
-/** Thông tin chuyển động được giữ từ lúc start motor tới lúc hoàn tất. */
-static my_app_move_context_t s_move_context;
-/** Cờ cho biết cảm biến đã sẵn sàng để xử lý lệnh hay chưa. */
-static bool s_is_sensor_ready = false;
-/** Cờ chặn báo lỗi init AS5600 lặp lại liên tục qua USB. */
-static bool s_has_init_error_been_reported = false;
-/** Góc tuyệt đối AS5600 được chọn làm yaw zero, tính bằng centi-độ. */
-static int32_t s_sensor_zero_cdeg = 0;
-/** Góc yaw mục tiêu cuối cùng được phần mềm chấp nhận, tính bằng centi-độ. */
-static int32_t s_current_yaw_cdeg = 0;
-/** Bộ lọc Kalman làm mượt góc tuyệt đối AS5600 trước khi tính yaw. */
-static my_app_kalman_filter_t s_sensor_kalman_filter;
-/** Bộ đệm truyền USB dùng chung cho các dòng report đã định dạng. */
-static char s_usb_tx_buffer[MY_APP_USB_TX_BUFFER_SIZE];
+static TCA9548A_Handle_t s_mux;                                 /**< Instance mux TCA9548A dùng để truy cập kênh cảm biến AS5600. */
+static AS5600_Data_t s_as5600_data;                             /**< Mẫu dữ liệu AS5600 mới nhất đọc qua mux. */
+static my_app_state_t s_app_state = MY_APP_STATE_WAIT_COMMAND;  /**< Trạng thái hiện tại của máy trạng thái lệnh/chuyển động. */
+static my_app_move_context_t s_move_context;                    /**< Thông tin chuyển động được giữ từ lúc start motor tới lúc hoàn tất. */
+static bool s_is_sensor_ready = false;                          /**< Cờ cho biết cảm biến đã sẵn sàng để xử lý lệnh hay chưa. */
+static bool s_has_init_error_been_reported = false;             /**< Cờ chặn báo lỗi init AS5600 lặp lại liên tục qua USB. */
+static int32_t s_sensor_zero_cdeg = 0;                          /**< Góc tuyệt đối AS5600 được chọn làm yaw zero, tính bằng centi-độ. */
+static int32_t s_current_yaw_cdeg = 0;                          /**< Góc yaw mục tiêu cuối cùng được phần mềm chấp nhận, tính bằng centi-độ. */
+static my_app_kalman_filter_t s_sensor_kalman_filter;           /**< Bộ lọc Kalman làm mượt góc tuyệt đối AS5600 trước khi tính yaw. */
+static char s_usb_tx_buffer[MY_APP_USB_TX_BUFFER_SIZE];         /**< Bộ đệm truyền USB dùng chung cho các dòng report đã định dạng. */
 
 static bool my_app_is_tca9548a_address(uint8_t device_address);
 static int8_t my_app_i2c_write(uint8_t device_address,

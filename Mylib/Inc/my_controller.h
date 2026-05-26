@@ -50,6 +50,18 @@ typedef struct {
 } MyController_MoveResult_t;
 
 /**
+ * @brief  Dữ liệu góc đọc từ ba AS5600 gắn trên TCA9548A CH0..CH2.
+ */
+typedef struct {
+    int32_t sensor1_angle_cdeg;     /**< Góc AS5600 kênh 0, centi-độ. */
+    int32_t sensor2_angle_cdeg;     /**< Góc AS5600 kênh 1, centi-độ. */
+    int32_t sensor3_angle_cdeg;     /**< Góc AS5600 kênh 2, centi-độ. */
+    uint16_t sensor1_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 0. */
+    uint16_t sensor2_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 1. */
+    uint16_t sensor3_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 2. */
+} MyController_ThreeSensorReadout_t;
+
+/**
  * @brief  Lệnh chạy đồng thời ba motor theo góc mục tiêu tuyệt đối.
  */
 typedef struct {
@@ -113,6 +125,14 @@ MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
  */
 MyController_Status_t MyController_ReadSensorYawCdeg(
     int32_t *sensor_yaw_cdeg);
+
+/**
+ * @brief  Đọc góc hiện tại của ba AS5600 trên TCA9548A CH0, CH1 và CH2.
+ * @param  readout: Nơi lưu góc centi-độ và raw angle của ba cảm biến.
+ * @return MY_CONTROLLER_OK nếu đọc đủ cả ba cảm biến.
+ */
+MyController_Status_t MyController_ReadThreeSensors(
+    MyController_ThreeSensorReadout_t *readout);
 
 /**
  * @brief  Bắt đầu chạy motor yaw tới góc mục tiêu.

@@ -18,8 +18,14 @@ TMC2209_HandleTypeDef motor1; /**< Driver TMC2209 thứ nhất. */
 TMC2209_HandleTypeDef motor2; /**< Driver TMC2209 thứ hai. */
 TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
 
-/** @brief Kênh AS5600 dùng làm phản hồi yaw. */
-#define MY_CONTROLLER_SENSOR_CHANNEL            TCA9548A_CH0
+/** @brief Kênh AS5600 thứ nhất, dùng làm phản hồi yaw hiện có. */
+#define MY_CONTROLLER_SENSOR1_CHANNEL           TCA9548A_CH0
+
+/** @brief Kênh AS5600 thứ hai trên cặp SD1/SC1 của TCA9548A. */
+#define MY_CONTROLLER_SENSOR2_CHANNEL           TCA9548A_CH1
+
+/** @brief Kênh AS5600 thứ ba trên cặp SD2/SC2 của TCA9548A. */
+#define MY_CONTROLLER_SENSOR3_CHANNEL           TCA9548A_CH2
 
 /** @brief Timeout giao dịch I2C, tính bằng mili giây. */
 #define MY_CONTROLLER_I2C_TIMEOUT_MS            20U
@@ -74,8 +80,14 @@ typedef struct {
 /** @brief Mux TCA9548A truy cập AS5600 yaw. */
 static TCA9548A_Handle_t s_mux;
 
-/** @brief Mẫu AS5600 mới nhất đọc qua mux. */
-static AS5600_Data_t s_as5600_data;
+/** @brief Mẫu AS5600 kênh 0 mới nhất đọc qua mux. */
+static AS5600_Data_t s_sensor1_data;
+
+/** @brief Mẫu AS5600 kênh 1 mới nhất đọc qua mux. */
+static AS5600_Data_t s_sensor2_data;
+
+/** @brief Mẫu AS5600 kênh 2 mới nhất đọc qua mux. */
+static AS5600_Data_t s_sensor3_data;
 
 /** @brief Góc tuyệt đối được chọn làm yaw zero. */
 static int32_t s_sensor_zero_cdeg = 0;
@@ -114,6 +126,11 @@ static int32_t prv_KalmanUpdate(my_controller_kalman_filter_t *filter,
                                 int32_t sample_cdeg);
 #endif
 static int32_t prv_NormalizeSensorYawCdeg(int32_t sensor_angle_cdeg);
+static int32_t prv_ConvertSensorAngleCdeg(const AS5600_Data_t *data);
+static MyController_Status_t prv_ReadSensorAngleCdeg(
+    TCA9548A_Channel_t channel,
+    AS5600_Data_t *data,
+    int32_t *angle_cdeg);
 static TMC2209_DirectionTypeDef prv_GetDirectionFromDelta(int32_t delta_cdeg);
 static TMC2209_DirectionTypeDef prv_GetOppositeDirection(
     TMC2209_DirectionTypeDef direction);
@@ -364,6 +381,46 @@ static int32_t prv_NormalizeSensorYawCdeg(int32_t sensor_angle_cdeg)
 }
 
 /**
+ * @brief  Đổi mẫu AS5600 12-bit sang centi-độ bằng số nguyên.
+ * @param  data: Mẫu AS5600 đã đọc bằng AS5600_ReadAll().
+ * @return Góc tuyệt đối trong khoảng 0 tới nhỏ hơn 36000 centi-độ.
+ */
+static int32_t prv_ConvertSensorAngleCdeg(const AS5600_Data_t *data)
+{
+    if (data == NULL) {
+        return 0;
+    }
+
+    return (int32_t)(((uint64_t)data->angle *
+                      (uint64_t)MY_CONTROLLER_FULL_TURN_CDEG) /
+                     (uint64_t)MY_CONTROLLER_AS5600_RAW_STEPS);
+}
+
+/**
+ * @brief  Đọc một AS5600 qua TCA9548A và trả về góc centi-độ.
+ * @param  channel: Kênh TCA9548A chứa AS5600 cần đọc.
+ * @param  data: Nơi lưu toàn bộ dữ liệu AS5600.
+ * @param  angle_cdeg: Nơi lưu góc đã đổi sang centi-độ.
+ * @return MY_CONTROLLER_OK nếu đọc cảm biến thành công.
+ */
+static MyController_Status_t prv_ReadSensorAngleCdeg(
+    TCA9548A_Channel_t channel,
+    AS5600_Data_t *data,
+    int32_t *angle_cdeg)
+{
+    if ((data == NULL) || (angle_cdeg == NULL)) {
+        return MY_CONTROLLER_ERR_NULL_PTR;
+    }
+
+    if (TCA9548A_ReadSensor(&s_mux, channel, data) != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    *angle_cdeg = prv_ConvertSensorAngleCdeg(data);
+    return MY_CONTROLLER_OK;
+}
+
+/**
  * @brief  Chuyển delta chuyển động có dấu sang hướng quay motor.
  * @param  delta_cdeg: Góc chạy tương đối, tính bằng centi-độ.
  * @return Hướng thuận chiều kim đồng hồ nếu delta không âm.
@@ -575,8 +632,20 @@ MyController_Status_t MyController_Init(void)
     }
 
     if (TCA9548A_RegisterSensor(&s_mux,
-                                MY_CONTROLLER_SENSOR_CHANNEL,
+                                MY_CONTROLLER_SENSOR1_CHANNEL,
                                 "AS5600_CH0") != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (TCA9548A_RegisterSensor(&s_mux,
+                                MY_CONTROLLER_SENSOR2_CHANNEL,
+                                "AS5600_CH1") != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (TCA9548A_RegisterSensor(&s_mux,
+                                MY_CONTROLLER_SENSOR3_CHANNEL,
+                                "AS5600_CH2") != TCA9548A_OK) {
         return MY_CONTROLLER_ERR_SENSOR;
     }
 
@@ -614,31 +683,61 @@ MyController_Status_t MyController_SetZeroFromSensor(void)
 MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
     int32_t *sensor_angle_cdeg)
 {
-    int32_t raw_angle_cdeg;
-
     if (sensor_angle_cdeg == NULL) {
         return MY_CONTROLLER_ERR_NULL_PTR;
     }
 
-    if (TCA9548A_ReadSensor(&s_mux,
-                            MY_CONTROLLER_SENSOR_CHANNEL,
-                            &s_as5600_data) != TCA9548A_OK) {
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR1_CHANNEL,
+                                &s_sensor1_data,
+                                sensor_angle_cdeg) != MY_CONTROLLER_OK) {
         return MY_CONTROLLER_ERR_SENSOR;
     }
 
-    /*
-     * Nhân trước rồi chia sau để giữ độ phân giải khi chuyển raw 12-bit của
-     * AS5600 sang centi-độ bằng số nguyên.
-     */
-    raw_angle_cdeg = (int32_t)(((uint64_t)s_as5600_data.angle *
-                                (uint64_t)MY_CONTROLLER_FULL_TURN_CDEG) /
-                               (uint64_t)MY_CONTROLLER_AS5600_RAW_STEPS);
-
 #if (MY_CONTROLLER_USE_KALMAN_FILTER != 0)
-    *sensor_angle_cdeg = prv_KalmanUpdate(&s_sensor_filter, raw_angle_cdeg);
+    *sensor_angle_cdeg = prv_KalmanUpdate(&s_sensor_filter,
+                                          *sensor_angle_cdeg);
 #else
-    *sensor_angle_cdeg = prv_NormalizeAbsoluteCdeg(raw_angle_cdeg);
+    *sensor_angle_cdeg = prv_NormalizeAbsoluteCdeg(*sensor_angle_cdeg);
 #endif
+    return MY_CONTROLLER_OK;
+}
+
+/**
+ * @brief  Đọc góc hiện tại của ba AS5600 trên TCA9548A CH0, CH1 và CH2.
+ * @param  readout: Nơi lưu góc centi-độ và raw angle của ba cảm biến.
+ * @return MY_CONTROLLER_OK nếu đọc đủ cả ba cảm biến.
+ */
+MyController_Status_t MyController_ReadThreeSensors(
+    MyController_ThreeSensorReadout_t *readout)
+{
+    if (readout == NULL) {
+        return MY_CONTROLLER_ERR_NULL_PTR;
+    }
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR1_CHANNEL,
+                                &s_sensor1_data,
+                                &readout->sensor1_angle_cdeg) !=
+        MY_CONTROLLER_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR2_CHANNEL,
+                                &s_sensor2_data,
+                                &readout->sensor2_angle_cdeg) !=
+        MY_CONTROLLER_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR3_CHANNEL,
+                                &s_sensor3_data,
+                                &readout->sensor3_angle_cdeg) !=
+        MY_CONTROLLER_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    readout->sensor1_raw_angle = s_sensor1_data.angle;
+    readout->sensor2_raw_angle = s_sensor2_data.angle;
+    readout->sensor3_raw_angle = s_sensor3_data.angle;
     return MY_CONTROLLER_OK;
 }
 

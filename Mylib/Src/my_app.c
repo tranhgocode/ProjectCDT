@@ -620,6 +620,7 @@ static void my_app_process_motor_done(void)
 static void my_app_process_three_motor_done(void)
 {
     MyController_Status_t controller_status;
+    MyController_ThreeSensorReadout_t sensor_readout;
     int32_t report_length;
     char motor1_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     char motor2_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
@@ -627,6 +628,9 @@ static void my_app_process_three_motor_done(void)
     char motor1_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     char motor2_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     char motor3_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char sensor1_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char sensor2_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char sensor3_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     unsigned long motor1_steps;
     unsigned long motor2_steps;
     unsigned long motor3_steps;
@@ -639,6 +643,13 @@ static void my_app_process_three_motor_done(void)
         &s_three_motor_context);
     if (controller_status != MY_CONTROLLER_OK) {
         my_app_usb_send_text("ERR: three-motor finish failed\r\n");
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
+        return;
+    }
+
+    controller_status = MyController_ReadThreeSensors(&sensor_readout);
+    if (controller_status != MY_CONTROLLER_OK) {
+        my_app_usb_send_text("ERR: cannot read 3 AS5600 sensors\r\n");
         s_app_state = MY_APP_STATE_WAIT_COMMAND;
         return;
     }
@@ -661,6 +672,15 @@ static void my_app_process_three_motor_done(void)
     my_app_format_angle_deg(s_three_motor_context.motor3_delta_cdeg,
                             motor3_delta_text,
                             sizeof(motor3_delta_text));
+    my_app_format_angle_deg(sensor_readout.sensor1_angle_cdeg,
+                            sensor1_angle_text,
+                            sizeof(sensor1_angle_text));
+    my_app_format_angle_deg(sensor_readout.sensor2_angle_cdeg,
+                            sensor2_angle_text,
+                            sizeof(sensor2_angle_text));
+    my_app_format_angle_deg(sensor_readout.sensor3_angle_cdeg,
+                            sensor3_angle_text,
+                            sizeof(sensor3_angle_text));
     motor1_steps = (unsigned long)s_three_motor_context.motor1_target_steps;
     motor2_steps = (unsigned long)s_three_motor_context.motor2_target_steps;
     motor3_steps = (unsigned long)s_three_motor_context.motor3_target_steps;
@@ -669,7 +689,8 @@ static void my_app_process_three_motor_done(void)
                              sizeof(s_usb_tx_buffer),
                              "three_ok,m1_t=%s,m1_d=%s,m1_s=%lu,"
                              "m2_t=%s,m2_d=%s,m2_s=%lu,"
-                             "m3_t=%s,m3_d=%s,m3_s=%lu\r\n",
+                             "m3_t=%s,m3_d=%s,m3_s=%lu,"
+                             "as1=%s,as2=%s,as3=%s\r\n",
                              motor1_angle_text,
                              motor1_delta_text,
                              motor1_steps,
@@ -678,7 +699,10 @@ static void my_app_process_three_motor_done(void)
                              motor2_steps,
                              motor3_angle_text,
                              motor3_delta_text,
-                             motor3_steps);
+                             motor3_steps,
+                             sensor1_angle_text,
+                             sensor2_angle_text,
+                             sensor3_angle_text);
 
     if ((report_length > 0) &&
         (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
@@ -742,7 +766,7 @@ void my_app_process(void)
     if ((s_has_sensor_init_error == true) &&
         (s_has_init_error_been_reported == false)) {
         my_app_usb_send_text(
-            "WARN: AS5600 init failed, three-motor command only\r\n");
+            "WARN: AS5600 init failed, sensor report unavailable\r\n");
         s_has_init_error_been_reported = true;
         return;
     }

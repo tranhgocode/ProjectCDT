@@ -36,14 +36,14 @@ TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
 /** @brief Tốc độ mặc định cho lệnh chạy đồng thời ba motor. */
 #define MY_CONTROLLER_THREE_MOTOR_SPEED_RPM     60.0f
 
-/** @brief Chiều motor1 tương ứng chuyển động từ phải qua trái. */
-#define MY_CONTROLLER_MOTOR1_RIGHT_TO_LEFT_DIR   TMC2209_DIR_CCW
+/** @brief Chiều thuận motor1 khi góc mục tiêu lớn hơn góc hiện tại. */
+#define MY_CONTROLLER_MOTOR1_FORWARD_DIR         TMC2209_DIR_CCW
 
-/** @brief Chiều motor2 tương ứng chuyển động từ trên xuống dưới. */
-#define MY_CONTROLLER_MOTOR2_TOP_TO_BOTTOM_DIR   TMC2209_DIR_CCW
+/** @brief Chiều thuận motor2 khi góc mục tiêu lớn hơn góc hiện tại. */
+#define MY_CONTROLLER_MOTOR2_FORWARD_DIR         TMC2209_DIR_CCW
 
-/** @brief Chiều motor3 tương ứng chuyển động từ trên xuống dưới. */
-#define MY_CONTROLLER_MOTOR3_TOP_TO_BOTTOM_DIR   TMC2209_DIR_CW
+/** @brief Chiều thuận motor3 khi góc mục tiêu lớn hơn góc hiện tại. */
+#define MY_CONTROLLER_MOTOR3_FORWARD_DIR         TMC2209_DIR_CW
 
 /** @brief Nhiễu quá trình giúp bộ lọc bám theo góc thật. */
 #define MY_CONTROLLER_KALMAN_PROCESS_NOISE      4.0f
@@ -83,6 +83,15 @@ static int32_t s_sensor_zero_cdeg = 0;
 /** @brief Góc yaw phần mềm sau lệnh gần nhất. */
 static int32_t s_current_yaw_cdeg = 0;
 
+/** @brief Vị trí phần mềm motor1, lấy gốc tại vị trí lúc khởi động. */
+static int32_t s_motor1_current_cdeg = 0;
+
+/** @brief Vị trí phần mềm motor2, lấy gốc tại vị trí lúc khởi động. */
+static int32_t s_motor2_current_cdeg = 0;
+
+/** @brief Vị trí phần mềm motor3, lấy gốc tại vị trí lúc khởi động. */
+static int32_t s_motor3_current_cdeg = 0;
+
 /** @brief Bộ lọc góc tuyệt đối AS5600. */
 static my_controller_kalman_filter_t s_sensor_filter;
 
@@ -106,9 +115,15 @@ static int32_t prv_KalmanUpdate(my_controller_kalman_filter_t *filter,
 #endif
 static int32_t prv_NormalizeSensorYawCdeg(int32_t sensor_angle_cdeg);
 static TMC2209_DirectionTypeDef prv_GetDirectionFromDelta(int32_t delta_cdeg);
+static TMC2209_DirectionTypeDef prv_GetOppositeDirection(
+    TMC2209_DirectionTypeDef direction);
+static TMC2209_DirectionTypeDef prv_GetThreeMotorDirection(
+    int32_t delta_cdeg,
+    TMC2209_DirectionTypeDef forward_direction);
 static uint32_t prv_CalculateMotorStepsFromCdeg(
     const TMC2209_HandleTypeDef *hmotor,
     int32_t angle_cdeg);
+static void prv_ResetThreeMotorOrigin(void);
 static int32_t prv_CalculateSensorDeltaCdeg(int32_t start_cdeg,
                                             int32_t end_cdeg,
                                             int32_t expected_delta_cdeg);
@@ -359,6 +374,34 @@ static TMC2209_DirectionTypeDef prv_GetDirectionFromDelta(int32_t delta_cdeg)
 }
 
 /**
+ * @brief  Lấy chiều ngược lại của một chiều quay TMC2209.
+ * @param  direction: Chiều quay cần đảo.
+ * @return TMC2209_DIR_CCW nếu đầu vào là CW, ngược lại trả về CW.
+ */
+static TMC2209_DirectionTypeDef prv_GetOppositeDirection(
+    TMC2209_DirectionTypeDef direction)
+{
+    return (direction == TMC2209_DIR_CW) ? TMC2209_DIR_CCW : TMC2209_DIR_CW;
+}
+
+/**
+ * @brief  Chọn chiều chạy ba motor từ dấu của delta góc.
+ * @param  delta_cdeg: Góc cần chạy từ vị trí hiện tại tới mục tiêu.
+ * @param  forward_direction: Chiều thuận của motor khi delta không âm.
+ * @return Chiều thuận nếu delta dương, chiều ngược nếu delta âm.
+ */
+static TMC2209_DirectionTypeDef prv_GetThreeMotorDirection(
+    int32_t delta_cdeg,
+    TMC2209_DirectionTypeDef forward_direction)
+{
+    if (delta_cdeg >= 0) {
+        return forward_direction;
+    }
+
+    return prv_GetOppositeDirection(forward_direction);
+}
+
+/**
  * @brief  Chuyển góc tương đối sang số microstep theo cấu hình từng motor.
  * @param  hmotor: Handle motor chứa số full-step và microstep đang dùng.
  * @param  angle_cdeg: Góc tương đối, tính bằng centi-độ.
@@ -386,6 +429,20 @@ static uint32_t prv_CalculateMotorStepsFromCdeg(
     return (uint32_t)(((uint64_t)angle_abs_cdeg * scaled_steps_per_turn +
                        ((uint64_t)MY_CONTROLLER_FULL_TURN_CDEG / 2U)) /
                       (uint64_t)MY_CONTROLLER_FULL_TURN_CDEG);
+}
+
+/**
+ * @brief  Lấy vị trí lúc khởi động làm gốc 0.00 độ cho cả ba motor.
+ */
+static void prv_ResetThreeMotorOrigin(void)
+{
+    s_motor1_current_cdeg = 0;
+    s_motor2_current_cdeg = 0;
+    s_motor3_current_cdeg = 0;
+
+    motor1.current_angle = 0.0f;
+    motor2.current_angle = 0.0f;
+    motor3.current_angle = 0.0f;
 }
 
 /**
@@ -485,6 +542,12 @@ void MyController_MotorsInit(void)
     (void)TMC2209_SetStealthChop(&motor1, true);
     (void)TMC2209_SetStealthChop(&motor2, true);
     (void)TMC2209_SetStealthChop(&motor3, true);
+
+    /*
+     * Không có cảm biến tuyệt đối cho từng trục, nên firmware dùng vị trí
+     * thực tế lúc cấp nguồn làm mốc 0.00 độ cho ba motor.
+     */
+    prv_ResetThreeMotorOrigin();
 }
 
 /**
@@ -651,7 +714,7 @@ MyController_Status_t MyController_StartTargetMove(
 
 /**
  * @brief  Bắt đầu chạy đồng thời ba motor theo ba góc nhập từ USB CDC.
- * @param  command: Ba góc tương đối cần chạy, tính bằng centi-độ.
+ * @param  command: Ba góc mục tiêu tuyệt đối 0..360 độ, tính bằng centi-độ.
  * @param  context: Nơi lưu số bước đã phát lệnh cho từng motor.
  * @return MY_CONTROLLER_OK nếu lệnh được chấp nhận.
  */
@@ -660,6 +723,7 @@ MyController_Status_t MyController_StartThreeMotorMove(
     MyController_ThreeMotorMoveContext_t *context)
 {
     TMC2209_StatusTypeDef motor_status;
+    TMC2209_DirectionTypeDef motor_direction;
 
     if ((command == NULL) || (context == NULL)) {
         return MY_CONTROLLER_ERR_NULL_PTR;
@@ -669,24 +733,36 @@ MyController_Status_t MyController_StartThreeMotorMove(
         return MY_CONTROLLER_ERR_MOTOR;
     }
 
+    context->motor1_start_cdeg = s_motor1_current_cdeg;
+    context->motor2_start_cdeg = s_motor2_current_cdeg;
+    context->motor3_start_cdeg = s_motor3_current_cdeg;
     context->motor1_angle_cdeg = command->motor1_angle_cdeg;
     context->motor2_angle_cdeg = command->motor2_angle_cdeg;
     context->motor3_angle_cdeg = command->motor3_angle_cdeg;
+    context->motor1_delta_cdeg =
+        command->motor1_angle_cdeg - s_motor1_current_cdeg;
+    context->motor2_delta_cdeg =
+        command->motor2_angle_cdeg - s_motor2_current_cdeg;
+    context->motor3_delta_cdeg =
+        command->motor3_angle_cdeg - s_motor3_current_cdeg;
     context->motor1_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor1, command->motor1_angle_cdeg);
+        prv_CalculateMotorStepsFromCdeg(&motor1, context->motor1_delta_cdeg);
     context->motor2_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor2, command->motor2_angle_cdeg);
+        prv_CalculateMotorStepsFromCdeg(&motor2, context->motor2_delta_cdeg);
     context->motor3_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor3, command->motor3_angle_cdeg);
+        prv_CalculateMotorStepsFromCdeg(&motor3, context->motor3_delta_cdeg);
 
     /*
-     * Chiều chạy được khóa theo cơ khí để người dùng nhập ba giá trị độ lớn,
-     * không phải nhớ dấu hoặc chiều điện của chân DIR.
+     * Ba giá trị USB là tọa độ tuyệt đối. Dấu của delta quyết định chiều để
+     * 0 -> 120 đi thuận, còn 360 -> 120 tự quay ngược về 120.
      */
     if (context->motor1_target_steps > 0U) {
+        motor_direction = prv_GetThreeMotorDirection(
+            context->motor1_delta_cdeg,
+            MY_CONTROLLER_MOTOR1_FORWARD_DIR);
         motor_status = TMC2209_MoveSteps(&motor1,
                                          context->motor1_target_steps,
-                                         MY_CONTROLLER_MOTOR1_RIGHT_TO_LEFT_DIR,
+                                         motor_direction,
                                          MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
@@ -695,9 +771,12 @@ MyController_Status_t MyController_StartThreeMotorMove(
     }
 
     if (context->motor2_target_steps > 0U) {
+        motor_direction = prv_GetThreeMotorDirection(
+            context->motor2_delta_cdeg,
+            MY_CONTROLLER_MOTOR2_FORWARD_DIR);
         motor_status = TMC2209_MoveSteps(&motor2,
                                          context->motor2_target_steps,
-                                         MY_CONTROLLER_MOTOR2_TOP_TO_BOTTOM_DIR,
+                                         motor_direction,
                                          MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
@@ -706,9 +785,12 @@ MyController_Status_t MyController_StartThreeMotorMove(
     }
 
     if (context->motor3_target_steps > 0U) {
+        motor_direction = prv_GetThreeMotorDirection(
+            context->motor3_delta_cdeg,
+            MY_CONTROLLER_MOTOR3_FORWARD_DIR);
         motor_status = TMC2209_MoveSteps(&motor3,
                                          context->motor3_target_steps,
-                                         MY_CONTROLLER_MOTOR3_TOP_TO_BOTTOM_DIR,
+                                         motor_direction,
                                          MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
@@ -737,6 +819,28 @@ bool MyController_IsThreeMotorMoveRunning(void)
     return ((motor1.state == TMC2209_RUNNING) ||
             (motor2.state == TMC2209_RUNNING) ||
             (motor3.state == TMC2209_RUNNING));
+}
+
+/**
+ * @brief  Hoàn tất lệnh ba motor và cập nhật vị trí phần mềm mới.
+ * @param  context: Ngữ cảnh đã lưu khi bắt đầu lệnh chạy.
+ * @return MY_CONTROLLER_OK nếu cả ba motor đã dừng.
+ */
+MyController_Status_t MyController_FinishThreeMotorMove(
+    const MyController_ThreeMotorMoveContext_t *context)
+{
+    if (context == NULL) {
+        return MY_CONTROLLER_ERR_NULL_PTR;
+    }
+
+    if (MyController_IsThreeMotorMoveRunning() == true) {
+        return MY_CONTROLLER_ERR_MOTOR;
+    }
+
+    s_motor1_current_cdeg = context->motor1_angle_cdeg;
+    s_motor2_current_cdeg = context->motor2_angle_cdeg;
+    s_motor3_current_cdeg = context->motor3_angle_cdeg;
+    return MY_CONTROLLER_OK;
 }
 
 /**

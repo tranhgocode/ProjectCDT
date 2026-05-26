@@ -50,21 +50,27 @@ typedef struct {
 } MyController_MoveResult_t;
 
 /**
- * @brief  Lệnh chạy đồng thời ba motor theo góc tương đối.
+ * @brief  Lệnh chạy đồng thời ba motor theo góc mục tiêu tuyệt đối.
  */
 typedef struct {
-    int32_t motor1_angle_cdeg;      /**< Góc motor1 cần chạy, centi-độ. */
-    int32_t motor2_angle_cdeg;      /**< Góc motor2 cần chạy, centi-độ. */
-    int32_t motor3_angle_cdeg;      /**< Góc motor3 cần chạy, centi-độ. */
+    int32_t motor1_angle_cdeg;      /**< Góc mục tiêu motor1, centi-độ. */
+    int32_t motor2_angle_cdeg;      /**< Góc mục tiêu motor2, centi-độ. */
+    int32_t motor3_angle_cdeg;      /**< Góc mục tiêu motor3, centi-độ. */
 } MyController_ThreeMotorMoveCommand_t;
 
 /**
  * @brief  Ngữ cảnh lệnh chạy đồng thời ba motor.
  */
 typedef struct {
-    int32_t motor1_angle_cdeg;      /**< Góc đã nhận cho motor1, centi-độ. */
-    int32_t motor2_angle_cdeg;      /**< Góc đã nhận cho motor2, centi-độ. */
-    int32_t motor3_angle_cdeg;      /**< Góc đã nhận cho motor3, centi-độ. */
+    int32_t motor1_start_cdeg;      /**< Góc bắt đầu motor1, centi-độ. */
+    int32_t motor2_start_cdeg;      /**< Góc bắt đầu motor2, centi-độ. */
+    int32_t motor3_start_cdeg;      /**< Góc bắt đầu motor3, centi-độ. */
+    int32_t motor1_angle_cdeg;      /**< Góc mục tiêu motor1, centi-độ. */
+    int32_t motor2_angle_cdeg;      /**< Góc mục tiêu motor2, centi-độ. */
+    int32_t motor3_angle_cdeg;      /**< Góc mục tiêu motor3, centi-độ. */
+    int32_t motor1_delta_cdeg;      /**< Delta đã ra lệnh cho motor1. */
+    int32_t motor2_delta_cdeg;      /**< Delta đã ra lệnh cho motor2. */
+    int32_t motor3_delta_cdeg;      /**< Delta đã ra lệnh cho motor3. */
     uint32_t motor1_target_steps;   /**< Số microstep motor1 cần chạy. */
     uint32_t motor2_target_steps;   /**< Số microstep motor2 cần chạy. */
     uint32_t motor3_target_steps;   /**< Số microstep motor3 cần chạy. */
@@ -120,11 +126,10 @@ MyController_Status_t MyController_StartTargetMove(
 
 /**
  * @brief  Bắt đầu chạy đồng thời ba motor theo ba góc nhập từ USB CDC.
- * @param  command: Ba góc tương đối cần chạy, tính bằng centi-độ.
+ * @param  command: Ba góc mục tiêu tuyệt đối 0..360 độ, tính bằng centi-độ.
  * @param  context: Nơi lưu số bước đã phát lệnh cho từng motor.
  * @return MY_CONTROLLER_OK nếu lệnh được chấp nhận.
- * @note   Chiều cơ khí được cố định trong module controller để lệnh USB chỉ
- *         cần nhập ba độ lớn chuyển động.
+ * @note   Vị trí hiện tại lúc khởi động được xem là 0.00 độ cho cả ba motor.
  */
 MyController_Status_t MyController_StartThreeMotorMove(
     const MyController_ThreeMotorMoveCommand_t *command,
@@ -141,6 +146,14 @@ bool MyController_IsTargetMotorRunning(void);
  * @return true nếu ít nhất một motor chưa hoàn tất lệnh.
  */
 bool MyController_IsThreeMotorMoveRunning(void);
+
+/**
+ * @brief  Hoàn tất lệnh ba motor và cập nhật vị trí phần mềm mới.
+ * @param  context: Ngữ cảnh đã lưu khi bắt đầu lệnh chạy.
+ * @return MY_CONTROLLER_OK nếu cả ba motor đã dừng.
+ */
+MyController_Status_t MyController_FinishThreeMotorMove(
+    const MyController_ThreeMotorMoveContext_t *context);
 
 /**
  * @brief  Hoàn tất lệnh yaw và tính sai số dựa trên AS5600.

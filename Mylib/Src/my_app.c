@@ -323,10 +323,10 @@ static bool my_app_parse_angle_field_cdeg(const uint8_t *buffer,
 }
 
 /**
- * @brief  Phân tích lệnh gồm ba góc để chạy đồng thời ba motor.
+ * @brief  Phân tích lệnh gồm ba góc mục tiêu để chạy đồng thời ba motor.
  * @param  buffer: Các byte lệnh nhận được.
  * @param  length: Số byte trong buffer.
- * @param  command: Nơi lưu ba góc motor, tính bằng centi-độ.
+ * @param  command: Nơi lưu ba góc mục tiêu, tính bằng centi-độ.
  * @return true nếu lệnh có đúng ba giá trị góc hợp lệ.
  * @note   Chấp nhận dạng "10 20 30", "10,20,30" hoặc "10;20;30".
  */
@@ -499,7 +499,7 @@ static bool my_app_start_three_motor_move(
 
 /**
  * @brief  Xử lý một lệnh USB CDC đang chờ khi ứng dụng ở trạng thái rảnh.
- * @note   Lệnh hợp lệ là "zero", một góc yaw, hoặc ba góc cho ba motor.
+ * @note   Ba góc cho ba motor là góc mục tiêu tuyệt đối trong khoảng 0..360.
  */
 static void my_app_process_usb_command(void)
 {
@@ -615,19 +615,31 @@ static void my_app_process_motor_done(void)
 }
 
 /**
- * @brief  Hoàn tất lệnh chạy đồng thời ba motor và báo số bước đã chạy.
+ * @brief  Hoàn tất lệnh ba motor và báo target, delta, số bước đã chạy.
  */
 static void my_app_process_three_motor_done(void)
 {
+    MyController_Status_t controller_status;
     int32_t report_length;
     char motor1_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     char motor2_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     char motor3_angle_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char motor1_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char motor2_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
+    char motor3_delta_text[MY_APP_ANGLE_TEXT_BUFFER_SIZE];
     unsigned long motor1_steps;
     unsigned long motor2_steps;
     unsigned long motor3_steps;
 
     if (MyController_IsThreeMotorMoveRunning() == true) {
+        return;
+    }
+
+    controller_status = MyController_FinishThreeMotorMove(
+        &s_three_motor_context);
+    if (controller_status != MY_CONTROLLER_OK) {
+        my_app_usb_send_text("ERR: three-motor finish failed\r\n");
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
         return;
     }
 
@@ -640,20 +652,32 @@ static void my_app_process_three_motor_done(void)
     my_app_format_angle_deg(s_three_motor_context.motor3_angle_cdeg,
                             motor3_angle_text,
                             sizeof(motor3_angle_text));
+    my_app_format_angle_deg(s_three_motor_context.motor1_delta_cdeg,
+                            motor1_delta_text,
+                            sizeof(motor1_delta_text));
+    my_app_format_angle_deg(s_three_motor_context.motor2_delta_cdeg,
+                            motor2_delta_text,
+                            sizeof(motor2_delta_text));
+    my_app_format_angle_deg(s_three_motor_context.motor3_delta_cdeg,
+                            motor3_delta_text,
+                            sizeof(motor3_delta_text));
     motor1_steps = (unsigned long)s_three_motor_context.motor1_target_steps;
     motor2_steps = (unsigned long)s_three_motor_context.motor2_target_steps;
     motor3_steps = (unsigned long)s_three_motor_context.motor3_target_steps;
 
     report_length = snprintf(s_usb_tx_buffer,
                              sizeof(s_usb_tx_buffer),
-                             "three_ok,m1_deg=%s,m1_steps=%lu,"
-                             "m2_deg=%s,m2_steps=%lu,"
-                             "m3_deg=%s,m3_steps=%lu\r\n",
+                             "three_ok,m1_t=%s,m1_d=%s,m1_s=%lu,"
+                             "m2_t=%s,m2_d=%s,m2_s=%lu,"
+                             "m3_t=%s,m3_d=%s,m3_s=%lu\r\n",
                              motor1_angle_text,
+                             motor1_delta_text,
                              motor1_steps,
                              motor2_angle_text,
+                             motor2_delta_text,
                              motor2_steps,
                              motor3_angle_text,
+                             motor3_delta_text,
                              motor3_steps);
 
     if ((report_length > 0) &&

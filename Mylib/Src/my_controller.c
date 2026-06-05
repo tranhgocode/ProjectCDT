@@ -45,11 +45,29 @@ TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
 /** @brief Chiều thuận motor1 khi góc mục tiêu lớn hơn góc hiện tại. */
 #define MY_CONTROLLER_MOTOR1_FORWARD_DIR         TMC2209_DIR_CCW
 
+/** @brief Tử số scale bước motor1 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM      90U
+
+/** @brief Mẫu số scale bước motor1 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN      20U
+
 /** @brief Chiều thuận motor2 khi góc mục tiêu lớn hơn góc hiện tại. */
-#define MY_CONTROLLER_MOTOR2_FORWARD_DIR         TMC2209_DIR_CCW
+#define MY_CONTROLLER_MOTOR2_FORWARD_DIR         TMC2209_DIR_CW
+
+/** @brief Tử số scale bước motor2 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM      91U
+
+/** @brief Mẫu số scale bước motor2 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN      20U
 
 /** @brief Chiều thuận motor3 khi góc mục tiêu lớn hơn góc hiện tại. */
-#define MY_CONTROLLER_MOTOR3_FORWARD_DIR         TMC2209_DIR_CW
+#define MY_CONTROLLER_MOTOR3_FORWARD_DIR         TMC2209_DIR_CCW
+
+/** @brief Tử số scale bước motor3 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM      91U
+
+/** @brief Mẫu số scale bước motor3 theo tỉ số truyền cơ khí. */
+#define MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN      20U
 
 /** @brief Nhiễu quá trình giúp bộ lọc bám theo góc thật. */
 #define MY_CONTROLLER_KALMAN_PROCESS_NOISE      4.0f
@@ -127,7 +145,7 @@ static int32_t prv_KalmanUpdate(my_controller_kalman_filter_t *filter,
 #endif
 static int32_t prv_NormalizeSensorYawCdeg(int32_t sensor_angle_cdeg);
 static int32_t prv_ConvertSensorAngleCdeg(const AS5600_Data_t *data);
-static MyController_Status_t prv_ReadSensorAngleCdeg(
+static TCA9548A_Status_t prv_ReadSensorAngleCdeg(
     TCA9548A_Channel_t channel,
     AS5600_Data_t *data,
     int32_t *angle_cdeg);
@@ -140,6 +158,9 @@ static TMC2209_DirectionTypeDef prv_GetThreeMotorDirection(
 static uint32_t prv_CalculateMotorStepsFromCdeg(
     const TMC2209_HandleTypeDef *hmotor,
     int32_t angle_cdeg);
+static uint32_t prv_ScaleMotorSteps(uint32_t steps,
+                                    uint32_t numerator,
+                                    uint32_t denominator);
 static void prv_ResetThreeMotorOrigin(void);
 static int32_t prv_CalculateSensorDeltaCdeg(int32_t start_cdeg,
                                             int32_t end_cdeg,
@@ -403,21 +424,24 @@ static int32_t prv_ConvertSensorAngleCdeg(const AS5600_Data_t *data)
  * @param  angle_cdeg: Nơi lưu góc đã đổi sang centi-độ.
  * @return MY_CONTROLLER_OK nếu đọc cảm biến thành công.
  */
-static MyController_Status_t prv_ReadSensorAngleCdeg(
+static TCA9548A_Status_t prv_ReadSensorAngleCdeg(
     TCA9548A_Channel_t channel,
     AS5600_Data_t *data,
     int32_t *angle_cdeg)
 {
+    TCA9548A_Status_t sensor_status;
+
     if ((data == NULL) || (angle_cdeg == NULL)) {
-        return MY_CONTROLLER_ERR_NULL_PTR;
+        return TCA9548A_ERR_NULL_PTR;
     }
 
-    if (TCA9548A_ReadSensor(&s_mux, channel, data) != TCA9548A_OK) {
-        return MY_CONTROLLER_ERR_SENSOR;
+    sensor_status = TCA9548A_ReadSensor(&s_mux, channel, data);
+    if (sensor_status != TCA9548A_OK) {
+        return sensor_status;
     }
 
     *angle_cdeg = prv_ConvertSensorAngleCdeg(data);
-    return MY_CONTROLLER_OK;
+    return TCA9548A_OK;
 }
 
 /**
@@ -486,6 +510,26 @@ static uint32_t prv_CalculateMotorStepsFromCdeg(
     return (uint32_t)(((uint64_t)angle_abs_cdeg * scaled_steps_per_turn +
                        ((uint64_t)MY_CONTROLLER_FULL_TURN_CDEG / 2U)) /
                       (uint64_t)MY_CONTROLLER_FULL_TURN_CDEG);
+}
+
+/**
+ * @brief  Nhân số bước với hệ số tỉ số truyền và làm tròn gần nhất.
+ * @param  steps: Số microstep gốc đã tính từ góc.
+ * @param  numerator: Tử số hệ số scale.
+ * @param  denominator: Mẫu số hệ số scale.
+ * @return Số microstep sau khi scale.
+ */
+static uint32_t prv_ScaleMotorSteps(uint32_t steps,
+                                    uint32_t numerator,
+                                    uint32_t denominator)
+{
+    if ((steps == 0U) || (denominator == 0U)) {
+        return 0U;
+    }
+
+    return (uint32_t)((((uint64_t)steps * (uint64_t)numerator) +
+                       ((uint64_t)denominator / 2U)) /
+                      (uint64_t)denominator);
 }
 
 /**
@@ -689,7 +733,7 @@ MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
 
     if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR1_CHANNEL,
                                 &s_sensor1_data,
-                                sensor_angle_cdeg) != MY_CONTROLLER_OK) {
+                                sensor_angle_cdeg) != TCA9548A_OK) {
         return MY_CONTROLLER_ERR_SENSOR;
     }
 
@@ -714,30 +758,43 @@ MyController_Status_t MyController_ReadThreeSensors(
         return MY_CONTROLLER_ERR_NULL_PTR;
     }
 
-    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR1_CHANNEL,
-                                &s_sensor1_data,
-                                &readout->sensor1_angle_cdeg) !=
-        MY_CONTROLLER_OK) {
-        return MY_CONTROLLER_ERR_SENSOR;
+    /*
+     * Không dừng ở cảm biến lỗi đầu tiên để USB report chỉ rõ kênh nào hỏng,
+     * kênh nào vẫn đọc được.
+     */
+    readout->sensor1_status = (int8_t)prv_ReadSensorAngleCdeg(
+        MY_CONTROLLER_SENSOR1_CHANNEL,
+        &s_sensor1_data,
+        &readout->sensor1_angle_cdeg);
+    if (readout->sensor1_status == (int8_t)TCA9548A_OK) {
+        readout->sensor1_raw_angle = s_sensor1_data.angle;
+    } else {
+        readout->sensor1_angle_cdeg = 0;
+        readout->sensor1_raw_angle = 0U;
     }
 
-    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR2_CHANNEL,
-                                &s_sensor2_data,
-                                &readout->sensor2_angle_cdeg) !=
-        MY_CONTROLLER_OK) {
-        return MY_CONTROLLER_ERR_SENSOR;
+    readout->sensor2_status = (int8_t)prv_ReadSensorAngleCdeg(
+        MY_CONTROLLER_SENSOR2_CHANNEL,
+        &s_sensor2_data,
+        &readout->sensor2_angle_cdeg);
+    if (readout->sensor2_status == (int8_t)TCA9548A_OK) {
+        readout->sensor2_raw_angle = s_sensor2_data.angle;
+    } else {
+        readout->sensor2_angle_cdeg = 0;
+        readout->sensor2_raw_angle = 0U;
     }
 
-    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR3_CHANNEL,
-                                &s_sensor3_data,
-                                &readout->sensor3_angle_cdeg) !=
-        MY_CONTROLLER_OK) {
-        return MY_CONTROLLER_ERR_SENSOR;
+    readout->sensor3_status = (int8_t)prv_ReadSensorAngleCdeg(
+        MY_CONTROLLER_SENSOR3_CHANNEL,
+        &s_sensor3_data,
+        &readout->sensor3_angle_cdeg);
+    if (readout->sensor3_status == (int8_t)TCA9548A_OK) {
+        readout->sensor3_raw_angle = s_sensor3_data.angle;
+    } else {
+        readout->sensor3_angle_cdeg = 0;
+        readout->sensor3_raw_angle = 0U;
     }
 
-    readout->sensor1_raw_angle = s_sensor1_data.angle;
-    readout->sensor2_raw_angle = s_sensor2_data.angle;
-    readout->sensor3_raw_angle = s_sensor3_data.angle;
     return MY_CONTROLLER_OK;
 }
 
@@ -844,12 +901,18 @@ MyController_Status_t MyController_StartThreeMotorMove(
         command->motor2_angle_cdeg - s_motor2_current_cdeg;
     context->motor3_delta_cdeg =
         command->motor3_angle_cdeg - s_motor3_current_cdeg;
-    context->motor1_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor1, context->motor1_delta_cdeg);
-    context->motor2_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor2, context->motor2_delta_cdeg);
-    context->motor3_target_steps =
-        prv_CalculateMotorStepsFromCdeg(&motor3, context->motor3_delta_cdeg);
+    context->motor1_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor1, context->motor1_delta_cdeg),
+        MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN);
+    context->motor2_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor2, context->motor2_delta_cdeg),
+        MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN);
+    context->motor3_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor3, context->motor3_delta_cdeg),
+        MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN);
 
     /*
      * Ba giá trị USB là tọa độ tuyệt đối. Dấu của delta quyết định chiều để

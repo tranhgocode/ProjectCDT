@@ -1,6 +1,6 @@
 /**
  * @file    my_app.c
- * @brief   Tầng ứng dụng xử lý lệnh USB CDC cho yaw và ba motor.
+ * @brief   Tang ung dung xu ly lenh USB CDC cho yaw va ba motor.
  * @author  Lap4all
  * @date    2026-05-14
  */
@@ -12,17 +12,17 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/** @brief Kích thước bộ đệm truyền USB CDC. */
-#define MY_APP_USB_TX_BUFFER_SIZE      192U
+/** @brief Kich thuoc bo dem truyen USB CDC. */
+#define MY_APP_USB_TX_BUFFER_SIZE      256U
 
-/** @brief Kích thước bộ đệm nhận lệnh USB CDC. */
+/** @brief Kich thuoc bo dem nhan lenh USB CDC. */
 #define MY_APP_USB_RX_BUFFER_SIZE      64U
 
-/** @brief Kích thước chuỗi cho một trường góc. */
+/** @brief Kich thuoc chuoi cho mot truong goc. */
 #define MY_APP_ANGLE_TEXT_BUFFER_SIZE  16U
 
 /**
- * @brief  Các trạng thái chính của máy trạng thái ứng dụng.
+ * @brief  Cac trang thai chinh cua may trang thai ung dung.
  */
 typedef enum {
     MY_APP_STATE_WAIT_COMMAND = 0,
@@ -32,25 +32,25 @@ typedef enum {
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
-/** @brief Trạng thái hiện tại của xử lý lệnh. */
+/** @brief Trang thai hien tai cua xu ly lenh. */
 static my_app_state_t s_app_state = MY_APP_STATE_WAIT_COMMAND;
 
-/** @brief Ngữ cảnh lệnh yaw đang chờ hoàn tất. */
+/** @brief Ngu canh lenh yaw dang cho hoan tat. */
 static MyController_MoveContext_t s_move_context;
 
-/** @brief Ngữ cảnh lệnh chạy đồng thời ba motor đang chờ hoàn tất. */
+/** @brief Ngu canh lenh chay dong thoi ba motor dang cho hoan tat. */
 static MyController_ThreeMotorMoveContext_t s_three_motor_context;
 
-/** @brief Cờ cho biết controller đã sẵn sàng xử lý lệnh. */
+/** @brief Co cho biet controller da san sang xu ly lenh. */
 static bool s_is_controller_ready = false;
 
-/** @brief Cờ cho biết nhánh cảm biến AS5600 không khởi tạo được. */
+/** @brief Co cho biet nhanh cam bien AS5600 khong khoi tao duoc. */
 static bool s_has_sensor_init_error = false;
 
-/** @brief Cờ chặn báo lỗi init lặp lại qua USB. */
+/** @brief Co chan bao loi init lap lai qua USB. */
 static bool s_has_init_error_been_reported = false;
 
-/** @brief Bộ đệm truyền USB dùng chung cho report. */
+/** @brief Bo dem truyen USB dung chung cho report. */
 static char s_usb_tx_buffer[MY_APP_USB_TX_BUFFER_SIZE];
 
 static bool my_app_usb_is_ready(void);
@@ -66,6 +66,10 @@ static bool my_app_parse_three_motor_command(
 static void my_app_format_angle_deg(int32_t angle_cdeg,
                                     char *buffer,
                                     uint16_t buffer_size);
+static void my_app_format_sensor_readout(int32_t angle_cdeg,
+                                         int8_t sensor_status,
+                                         char *buffer,
+                                         uint16_t buffer_size);
 static bool my_app_set_zero_from_sensor(void);
 static bool my_app_start_target_move(int32_t target_yaw_cdeg);
 static bool my_app_start_three_motor_move(
@@ -75,21 +79,21 @@ static void my_app_process_motor_done(void);
 static void my_app_process_three_motor_done(void);
 
 /**
- * @brief  Kiểm tra USB CDC đã cấu hình và sẵn sàng truyền gói mới chưa.
- * @return true nếu USB CDC có thể truyền, ngược lại false.
+ * @brief  Kiem tra USB CDC da cau hinh va san sang truyen goi moi chua.
+ * @return true neu USB CDC co the truyen, nguoc lai false.
  */
 static bool my_app_usb_is_ready(void)
 {
     USBD_CDC_HandleTypeDef *cdc_handle;
 
-    // USB phải được host cấu hình xong trước khi gọi CDC_Transmit_FS().
+    // USB phai duoc host cau hinh xong truoc khi goi CDC_Transmit_FS().
     if (hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED) {
         return false;
     }
 
     cdc_handle = (USBD_CDC_HandleTypeDef *)hUsbDeviceFS.pClassData;
 
-    // TxState khác 0 nghĩa là gói trước vẫn đang được USB stack xử lý.
+    // TxState khac 0 nghia la goi truoc van dang duoc USB stack xu ly.
     if ((cdc_handle == NULL) || (cdc_handle->TxState != 0U)) {
         return false;
     }
@@ -98,8 +102,8 @@ static bool my_app_usb_is_ready(void)
 }
 
 /**
- * @brief  Gửi chuỗi kết thúc null qua USB CDC với giới hạn độ dài.
- * @param  text: Chuỗi kết thúc null cần gửi.
+ * @brief  Gui chuoi ket thuc null qua USB CDC voi gioi han do dai.
+ * @param  text: Chuoi ket thuc null can gui.
  */
 static void my_app_usb_send_text(const char *text)
 {
@@ -109,7 +113,7 @@ static void my_app_usb_send_text(const char *text)
         return;
     }
 
-    // Giới hạn chiều dài để không vượt quá buffer truyền USB dùng chung.
+    // Gioi han do dai de khong vuot qua bo dem truyen USB dung chung.
     while ((text[text_length] != '\0') &&
            (text_length < (MY_APP_USB_TX_BUFFER_SIZE - 1U))) {
         text_length++;
@@ -121,17 +125,17 @@ static void my_app_usb_send_text(const char *text)
 }
 
 /**
- * @brief  Nhận diện lệnh "zero" không phân biệt hoa thường.
- * @param  buffer: Các byte lệnh nhận được.
- * @param  length: Số byte trong buffer.
- * @return true nếu lệnh yêu cầu đặt lại yaw zero, ngược lại false.
+ * @brief  Nhan dien lenh "zero" khong phan biet chu hoa, chu thuong.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @return true neu lenh yeu cau dat lai yaw zero, nguoc lai false.
  */
 static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length)
 {
     uint16_t start_index = 0U;
     uint16_t end_index = length;
 
-    // Chấp nhận lệnh từ terminal có khoảng trắng hoặc CR/LF ở đầu dòng.
+    // Chap nhan lenh tu terminal co khoang trang hoac CR/LF o dau dong.
     while ((start_index < length) &&
            ((buffer[start_index] == ' ') ||
             (buffer[start_index] == '\t') ||
@@ -140,7 +144,7 @@ static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length)
         start_index++;
     }
 
-    // Terminal thường gửi kèm CR/LF, nên bỏ phần đuôi trước khi so khớp.
+    // Terminal thuong gui kem CR/LF, nen bo phan duoi truoc khi so khop.
     while ((end_index > start_index) &&
            ((buffer[end_index - 1U] == ' ') ||
             (buffer[end_index - 1U] == '\t') ||
@@ -164,12 +168,12 @@ static bool my_app_is_zero_command(const uint8_t *buffer, uint16_t length)
 }
 
 /**
- * @brief  Phân tích lệnh yaw dạng số thập phân sang centi-độ.
- * @param  buffer: Các byte lệnh nhận được.
- * @param  length: Số byte trong buffer.
- * @param  target_angle_cdeg: Góc sau khi phân tích, tính bằng centi-độ.
- * @return true nếu lệnh là góc thập phân hợp lệ, ngược lại false.
- * @note   Chỉ giữ hai chữ số thập phân để khớp với cách lưu centi-độ.
+ * @brief  Phan tich lenh yaw dang so thap phan sang centi-do.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @param  target_angle_cdeg: Goc sau khi phan tich, tinh bang centi-do.
+ * @return true neu lenh la goc thap phan hop le, nguoc lai false.
+ * @note   Chi giu hai chu so thap phan de khop voi cach luu centi-do.
  */
 static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
                                            uint16_t length,
@@ -198,8 +202,8 @@ static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
     }
 
     /*
-     * Module controller nhận centi-độ, nên app chỉ chấp nhận tối đa hai chữ
-     * số thập phân để tránh làm người dùng tưởng hệ thống giữ độ phân giải hơn.
+     * Module controller nhan centi-do, nen app chi chap nhan toi da hai chu
+     * so thap phan de tranh lam nguoi dung tuong he thong giu do phan giai hon.
      */
     if ((index < length) && (buffer[index] == '.')) {
         index++;
@@ -235,9 +239,9 @@ static bool my_app_parse_target_angle_cdeg(const uint8_t *buffer,
 }
 
 /**
- * @brief  Kiểm tra ký tự phân tách giữa các góc trong lệnh ba motor.
- * @param  value: Ký tự cần kiểm tra.
- * @return true nếu là khoảng trắng, dấu phẩy hoặc dấu chấm phẩy.
+ * @brief  Kiem tra ky tu phan tach giua cac goc trong lenh ba motor.
+ * @param  value: Ky tu can kiem tra.
+ * @return true neu la khoang trang, dau phay hoac dau cham phay.
  */
 static bool my_app_is_three_motor_separator(uint8_t value)
 {
@@ -248,10 +252,10 @@ static bool my_app_is_three_motor_separator(uint8_t value)
 }
 
 /**
- * @brief  Bỏ qua các ký tự phân tách trong lệnh ba motor.
- * @param  buffer: Các byte lệnh nhận được.
- * @param  length: Số byte trong buffer.
- * @param  index: Vị trí đọc hiện tại, được cập nhật sau khi bỏ qua.
+ * @brief  Bo qua cac ky tu phan tach trong lenh ba motor.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @param  index: Vi tri doc hien tai, duoc cap nhat sau khi bo qua.
  */
 static void my_app_skip_three_motor_separators(const uint8_t *buffer,
                                                uint16_t length,
@@ -264,12 +268,12 @@ static void my_app_skip_three_motor_separators(const uint8_t *buffer,
 }
 
 /**
- * @brief  Phân tích một trường góc dương trong lệnh ba motor.
- * @param  buffer: Các byte lệnh nhận được.
- * @param  length: Số byte trong buffer.
- * @param  index: Vị trí đọc hiện tại, được cập nhật sau khi đọc trường.
- * @param  angle_cdeg: Góc sau khi phân tích, tính bằng centi-độ.
- * @return true nếu trường hiện tại là một số góc hợp lệ.
+ * @brief  Phan tich mot truong goc duong trong lenh ba motor.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @param  index: Vi tri doc hien tai, duoc cap nhat sau khi doc truong.
+ * @param  angle_cdeg: Goc sau khi phan tich, tinh bang centi-do.
+ * @return true neu truong hien tai la mot so goc hop le.
  */
 static bool my_app_parse_angle_field_cdeg(const uint8_t *buffer,
                                           uint16_t length,
@@ -323,12 +327,12 @@ static bool my_app_parse_angle_field_cdeg(const uint8_t *buffer,
 }
 
 /**
- * @brief  Phân tích lệnh gồm ba góc mục tiêu để chạy đồng thời ba motor.
- * @param  buffer: Các byte lệnh nhận được.
- * @param  length: Số byte trong buffer.
- * @param  command: Nơi lưu ba góc mục tiêu, tính bằng centi-độ.
- * @return true nếu lệnh có đúng ba giá trị góc hợp lệ.
- * @note   Chấp nhận dạng "10 20 30", "10,20,30" hoặc "10;20;30".
+ * @brief  Phan tich lenh gom ba goc muc tieu de chay dong thoi ba motor.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @param  command: Noi luu ba goc muc tieu, tinh bang centi-do.
+ * @return true neu lenh co dung ba gia tri goc hop le.
+ * @note   Chap nhan dang "10 20 30", "10,20,30" hoac "10;20;30".
  */
 static bool my_app_parse_three_motor_command(
     const uint8_t *buffer,
@@ -376,11 +380,11 @@ static bool my_app_parse_three_motor_command(
 }
 
 /**
- * @brief  Định dạng góc centi-độ thành chuỗi độ có cố định hai chữ số lẻ.
- * @param  angle_cdeg: Góc tính bằng centi-độ.
- * @param  buffer: Bộ đệm chuỗi đích.
- * @param  buffer_size: Kích thước bộ đệm đích, tính bằng byte.
- * @note   Định dạng bằng số nguyên để không cần bật hỗ trợ printf số thực.
+ * @brief  Dinh dang goc centi-do thanh chuoi do co co dinh hai chu so le.
+ * @param  angle_cdeg: Goc tinh bang centi-do.
+ * @param  buffer: Bo dem chuoi dich.
+ * @param  buffer_size: Kich thuoc bo dem dich, tinh bang byte.
+ * @note   Dinh dang bang so nguyen de khong can bat ho tro printf so thuc.
  */
 static void my_app_format_angle_deg(int32_t angle_cdeg,
                                     char *buffer,
@@ -417,8 +421,32 @@ static void my_app_format_angle_deg(int32_t angle_cdeg,
 }
 
 /**
- * @brief  Đặt góc cảm biến hiện tại làm yaw zero và báo kết quả qua USB.
- * @return true nếu controller cập nhật zero thành công.
+ * @brief  Dinh dang ket qua doc mot AS5600 thanh goc hoac ma loi.
+ * @param  angle_cdeg: Goc doc duoc, tinh bang centi-do.
+ * @param  sensor_status: Ma loi kenh TCA9548A/AS5600, 0 la doc thanh cong.
+ * @param  buffer: Bo dem chuoi dich.
+ * @param  buffer_size: Kich thuoc bo dem dich, tinh bang byte.
+ */
+static void my_app_format_sensor_readout(int32_t angle_cdeg,
+                                         int8_t sensor_status,
+                                         char *buffer,
+                                         uint16_t buffer_size)
+{
+    if ((buffer == NULL) || (buffer_size == 0U)) {
+        return;
+    }
+
+    if (sensor_status == 0) {
+        my_app_format_angle_deg(angle_cdeg, buffer, buffer_size);
+        return;
+    }
+
+    (void)snprintf(buffer, buffer_size, "ERR%d", (int)sensor_status);
+}
+
+/**
+ * @brief  Dat goc cam bien hien tai lam yaw zero va bao ket qua qua USB.
+ * @return true neu controller cap nhat zero thanh cong.
  */
 static bool my_app_set_zero_from_sensor(void)
 {
@@ -433,9 +461,9 @@ static bool my_app_set_zero_from_sensor(void)
 }
 
 /**
- * @brief  Bắt đầu chạy motor từ yaw hiện tại tới yaw mục tiêu.
- * @param  target_yaw_cdeg: Góc yaw mục tiêu tuyệt đối, tính bằng centi-độ.
- * @return true nếu lệnh chạy được controller chấp nhận.
+ * @brief  Bat dau chay motor tu yaw hien tai toi yaw muc tieu.
+ * @param  target_yaw_cdeg: Goc yaw muc tieu tuyet doi, tinh bang centi-do.
+ * @return true neu lenh chay duoc controller chap nhan.
  */
 static bool my_app_start_target_move(int32_t target_yaw_cdeg)
 {
@@ -459,17 +487,17 @@ static bool my_app_start_target_move(int32_t target_yaw_cdeg)
     }
 
     /*
-     * Kể cả khi target_steps bằng 0, app vẫn đi qua trạng thái WAIT_MOTOR để
-     * tạo một report cùng định dạng với các lệnh có chạy motor.
+     * Ke ca khi target_steps bang 0, app van di qua trang thai WAIT_MOTOR de
+     * tao mot report cung dinh dang voi cac lenh co chay motor.
      */
     s_app_state = MY_APP_STATE_WAIT_MOTOR;
     return true;
 }
 
 /**
- * @brief  Bắt đầu lệnh chạy đồng thời ba motor từ USB CDC.
- * @param  command: Ba góc cần chạy theo thứ tự motor1, motor2, motor3.
- * @return true nếu lệnh được controller chấp nhận.
+ * @brief  Bat dau lenh chay dong thoi ba motor tu USB CDC.
+ * @param  command: Ba goc can chay theo thu tu motor1, motor2, motor3.
+ * @return true neu lenh duoc controller chap nhan.
  */
 static bool my_app_start_three_motor_move(
     const MyController_ThreeMotorMoveCommand_t *command)
@@ -490,16 +518,16 @@ static bool my_app_start_three_motor_move(
     }
 
     /*
-     * Lệnh toàn số 0 vẫn đi qua trạng thái chờ để terminal nhận được report
-     * cùng định dạng với các lệnh có tạo xung STEP.
+     * Lenh toan so 0 van di qua trang thai cho de terminal nhan duoc report
+     * cung dinh dang voi cac lenh co tao xung STEP.
      */
     s_app_state = MY_APP_STATE_WAIT_THREE_MOTOR;
     return true;
 }
 
 /**
- * @brief  Xử lý một lệnh USB CDC đang chờ khi ứng dụng ở trạng thái rảnh.
- * @note   Ba góc cho ba motor là góc mục tiêu tuyệt đối trong khoảng 0..360.
+ * @brief  Xu ly mot lenh USB CDC dang cho khi ung dung o trang thai ranh.
+ * @note   Ba goc cho ba motor la goc muc tieu tuyet doi trong khoang 0..360.
  */
 static void my_app_process_usb_command(void)
 {
@@ -514,7 +542,7 @@ static void my_app_process_usb_command(void)
         return;
     }
 
-    // Lệnh zero được ưu tiên vì không phải là một giá trị góc số.
+    // Lenh zero duoc uu tien vi khong phai la mot gia tri goc so.
     if (my_app_is_zero_command(command_buffer, command_length) == true) {
         (void)my_app_set_zero_from_sensor();
         return;
@@ -545,8 +573,8 @@ static void my_app_process_usb_command(void)
 }
 
 /**
- * @brief  Hoàn tất một lần chạy motor và báo sai số cảm biến qua USB CDC.
- * @note   Công cụ ghi CSV cần đúng tên các trường report được phát ra ở đây.
+ * @brief  Hoan tat mot lan chay motor va bao sai so cam bien qua USB CDC.
+ * @note   Cong cu ghi CSV can dung ten cac truong report duoc phat ra o day.
  */
 static void my_app_process_motor_done(void)
 {
@@ -604,7 +632,7 @@ static void my_app_process_motor_done(void)
                              error_angle_text,
                              (unsigned long)s_move_context.target_steps);
 
-    // Giữ nguyên tên trường vì read_uart.py đang dùng format này để ghi CSV.
+    // Giu nguyen ten truong vi read_uart.py dang dung format nay de ghi CSV.
     if ((report_length > 0) &&
         (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
         (void)CDC_Transmit_FS((uint8_t *)s_usb_tx_buffer,
@@ -615,7 +643,7 @@ static void my_app_process_motor_done(void)
 }
 
 /**
- * @brief  Hoàn tất lệnh ba motor và báo target, delta, số bước đã chạy.
+ * @brief  Hoan tat lenh ba motor va bao target, delta, so buoc da chay.
  */
 static void my_app_process_three_motor_done(void)
 {
@@ -672,15 +700,18 @@ static void my_app_process_three_motor_done(void)
     my_app_format_angle_deg(s_three_motor_context.motor3_delta_cdeg,
                             motor3_delta_text,
                             sizeof(motor3_delta_text));
-    my_app_format_angle_deg(sensor_readout.sensor1_angle_cdeg,
-                            sensor1_angle_text,
-                            sizeof(sensor1_angle_text));
-    my_app_format_angle_deg(sensor_readout.sensor2_angle_cdeg,
-                            sensor2_angle_text,
-                            sizeof(sensor2_angle_text));
-    my_app_format_angle_deg(sensor_readout.sensor3_angle_cdeg,
-                            sensor3_angle_text,
-                            sizeof(sensor3_angle_text));
+    my_app_format_sensor_readout(sensor_readout.sensor1_angle_cdeg,
+                                 sensor_readout.sensor1_status,
+                                 sensor1_angle_text,
+                                 sizeof(sensor1_angle_text));
+    my_app_format_sensor_readout(sensor_readout.sensor2_angle_cdeg,
+                                 sensor_readout.sensor2_status,
+                                 sensor2_angle_text,
+                                 sizeof(sensor2_angle_text));
+    my_app_format_sensor_readout(sensor_readout.sensor3_angle_cdeg,
+                                 sensor_readout.sensor3_status,
+                                 sensor3_angle_text,
+                                 sizeof(sensor3_angle_text));
     motor1_steps = (unsigned long)s_three_motor_context.motor1_target_steps;
     motor2_steps = (unsigned long)s_three_motor_context.motor2_target_steps;
     motor3_steps = (unsigned long)s_three_motor_context.motor3_target_steps;
@@ -690,7 +721,9 @@ static void my_app_process_three_motor_done(void)
                              "three_ok,m1_t=%s,m1_d=%s,m1_s=%lu,"
                              "m2_t=%s,m2_d=%s,m2_s=%lu,"
                              "m3_t=%s,m3_d=%s,m3_s=%lu,"
-                             "as1=%s,as2=%s,as3=%s\r\n",
+                             "as1=%s,as1_st=%d,"
+                             "as2=%s,as2_st=%d,"
+                             "as3=%s,as3_st=%d\r\n",
                              motor1_angle_text,
                              motor1_delta_text,
                              motor1_steps,
@@ -701,8 +734,11 @@ static void my_app_process_three_motor_done(void)
                              motor3_delta_text,
                              motor3_steps,
                              sensor1_angle_text,
+                             (int)sensor_readout.sensor1_status,
                              sensor2_angle_text,
-                             sensor3_angle_text);
+                             (int)sensor_readout.sensor2_status,
+                             sensor3_angle_text,
+                             (int)sensor_readout.sensor3_status);
 
     if ((report_length > 0) &&
         (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
@@ -714,7 +750,7 @@ static void my_app_process_three_motor_done(void)
 }
 
 /**
- * @brief  Khởi tạo tầng ứng dụng và module điều khiển yaw.
+ * @brief  Khoi tao tang ung dung va module dieu khien yaw.
  */
 void my_app_init(void)
 {
@@ -728,8 +764,8 @@ void my_app_init(void)
     controller_status = MyController_Init();
     if (controller_status == MY_CONTROLLER_ERR_SENSOR) {
         /*
-         * Ba motor đã được khởi tạo trước nhánh AS5600, nên vẫn cho phép
-         * lệnh chạy nhóm không cần phản hồi cảm biến.
+         * Ba motor da duoc khoi tao truoc nhanh AS5600, nen van cho phep
+         * lenh chay nhom khong can phan hoi cam bien.
          */
         s_is_controller_ready = true;
         s_has_sensor_init_error = true;
@@ -745,8 +781,8 @@ void my_app_init(void)
 }
 
 /**
- * @brief  Chạy máy trạng thái ứng dụng theo kiểu không chặn.
- * @note   Gọi hàm này lặp lại trong vòng lặp main.
+ * @brief  Chay may trang thai ung dung theo kieu khong chan.
+ * @note   Goi ham nay lap lai trong vong lap main.
  */
 void my_app_process(void)
 {
@@ -756,7 +792,7 @@ void my_app_process(void)
 
     if (s_is_controller_ready == false) {
         if (s_has_init_error_been_reported == false) {
-            // Báo lỗi init một lần để terminal không bị spam liên tục.
+            // Bao loi init mot lan de terminal khong bi spam lien tuc.
             my_app_usb_send_text("ERR: controller init failed\r\n");
             s_has_init_error_been_reported = true;
         }

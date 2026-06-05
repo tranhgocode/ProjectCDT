@@ -59,6 +59,9 @@ typedef struct {
     uint16_t sensor1_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 0. */
     uint16_t sensor2_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 1. */
     uint16_t sensor3_raw_angle;     /**< Góc raw 12-bit của AS5600 kênh 2. */
+    int8_t sensor1_status;          /**< Trạng thái đọc kênh 0, 0 là OK. */
+    int8_t sensor2_status;          /**< Trạng thái đọc kênh 1, 0 là OK. */
+    int8_t sensor3_status;          /**< Trạng thái đọc kênh 2, 0 là OK. */
 } MyController_ThreeSensorReadout_t;
 
 /**
@@ -129,7 +132,8 @@ MyController_Status_t MyController_ReadSensorYawCdeg(
 /**
  * @brief  Đọc góc hiện tại của ba AS5600 trên TCA9548A CH0, CH1 và CH2.
  * @param  readout: Nơi lưu góc centi-độ và raw angle của ba cảm biến.
- * @return MY_CONTROLLER_OK nếu đọc đủ cả ba cảm biến.
+ * @return MY_CONTROLLER_OK nếu thao tác đọc được thực hiện.
+ * @note   Kiểm tra sensor1_status..sensor3_status để biết lỗi từng kênh.
  */
 MyController_Status_t MyController_ReadThreeSensors(
     MyController_ThreeSensorReadout_t *readout);

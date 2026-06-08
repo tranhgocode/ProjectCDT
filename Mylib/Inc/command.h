@@ -102,4 +102,15 @@ void Command_FormatAngleDeg(int32_t angle_cdeg, char *buffer,
 void Command_FormatSensorReadout(int32_t angle_cdeg, int8_t sensor_status,
                                  char *buffer, uint16_t buffer_size);
 
+void Command_AppendChar(char *buffer, uint16_t buffer_size, uint16_t *index,
+                        char value);
+void Command_AppendText(char *buffer, uint16_t buffer_size, uint16_t *index,
+                        const char *text);
+void Command_AppendUnsigned(char *buffer, uint16_t buffer_size, uint16_t *index,
+                            uint32_t value);
+void Command_AppendSigned(char *buffer, uint16_t buffer_size, uint16_t *index,
+                          int32_t value);
+void Command_AppendAngleDeg(int32_t angle_cdeg, char *buffer,
+                            uint16_t buffer_size, uint16_t *index);
+
 #endif /* INC_COMMAND_H_ */

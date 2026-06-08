@@ -8,6 +8,8 @@
 #include "my_app.h"
 #include "my_controller.h"
 #include "command.h"
+#include "traj_runner.h"
+#include "my_queue.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -18,6 +20,7 @@ typedef enum {
     MY_APP_STATE_WAIT_COMMAND = 0,
     MY_APP_STATE_WAIT_MOTOR,
     MY_APP_STATE_WAIT_THREE_MOTOR,
+    MY_APP_STATE_TRAJ_RUNNING,    /**< Dang thuc thi quy dao tu PC. */
 } my_app_state_t;
 
 /** @brief Trang thai hien tai cua xu ly lenh. */
@@ -184,6 +187,33 @@ static void my_app_process_usb_command(void)
         return;
     }
 
+    /*
+     * Byte dau la 0xAA: du lieu frame nhi phan, chuyen toan bo vao parser.
+     * Khong xu ly them vi frame co the bi cat thanh nhieu goi USB.
+     */
+    if (command_buffer[0] == MY_QUEUE_FRAME_HEADER_0) {
+        MyRunner_FeedBytes(command_buffer, command_length);
+        return;
+    }
+
+    // Lenh STOP: dung khan cap quy dao dang chay hoac huy bo truoc khi GO.
+    if (Command_IsStopCommand(command_buffer, command_length) == true) {
+        MyRunner_Stop();
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
+        return;
+    }
+
+    // Lenh GO: bat dau thuc thi quy dao tu queue da duoc nap san.
+    if (Command_IsGoCommand(command_buffer, command_length) == true) {
+        if (MyQueue_IsEmpty()) {
+            Command_UsbSendText("ERR: traj queue empty, send frames first\r\n");
+        } else {
+            MyRunner_Start();
+            s_app_state = MY_APP_STATE_TRAJ_RUNNING;
+        }
+        return;
+    }
+
     // Lenh zero duoc uu tien vi khong phai la mot gia tri goc so.
     if (Command_IsZeroCommand(command_buffer, command_length) == true) {
         (void)my_app_set_zero_from_sensor();
@@ -314,6 +344,33 @@ static void my_app_process_three_motor_done(void)
 }
 
 /**
+ * @brief  Xu ly trang thai thuc thi quy dao: nap frame moi va kiem tra ket thuc.
+ */
+static void my_app_process_traj(void)
+{
+    uint8_t  traj_buf[COMMAND_USB_RX_BUFFER_SIZE];
+    uint16_t traj_len = 0U;
+
+    /* Nhan va phan loai du lieu USB trong khi dang chay quy dao. */
+    if (Command_ReadUsb(traj_buf, sizeof(traj_buf), &traj_len) != 0U) {
+        if (Command_IsStopCommand(traj_buf, traj_len) == true) {
+            MyRunner_Stop();
+            s_app_state = MY_APP_STATE_WAIT_COMMAND;
+            return;
+        }
+        /* Tat ca du lieu khac (frame bo sung tu PC) dua vao parser. */
+        MyRunner_FeedBytes(traj_buf, traj_len);
+    }
+
+    MyRunner_Process();
+
+    /* Runner tu chuyen ve IDLE khi queue can; dong bo trang thai my_app. */
+    if (MyRunner_IsActive() == false) {
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
+    }
+}
+
+/**
  * @brief  Khoi tao tang ung dung va module dieu khien yaw.
  */
 void my_app_init(void)
@@ -324,6 +381,8 @@ void my_app_init(void)
     s_has_sensor_init_error = false;
     s_has_init_error_been_reported = false;
     s_app_state = MY_APP_STATE_WAIT_COMMAND;
+
+    MyRunner_Init();
 
     controller_status = MyController_Init();
     if (controller_status == MY_CONTROLLER_ERR_SENSOR) {
@@ -368,6 +427,11 @@ void my_app_process(void)
         Command_UsbSendText(
             "WARN: AS5600 init failed, sensor report unavailable\r\n");
         s_has_init_error_been_reported = true;
+        return;
+    }
+
+    if (s_app_state == MY_APP_STATE_TRAJ_RUNNING) {
+        my_app_process_traj();
         return;
     }
 

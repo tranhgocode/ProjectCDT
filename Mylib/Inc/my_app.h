@@ -75,6 +75,20 @@
 /** @brief Mẫu số tỉ lệ bước của Motor3. */
 #define MY_APP_MOTOR3_STEP_SCALE_DEN            20U
 
+/* Cài đặt chế độ quỹ đạo ------------------------------------------------- */
+
+/** @brief Số frame tối đa lưu trong hàng đợi quỹ đạo. */
+#define MY_QUEUE_CAPACITY               200U
+
+/** @brief Tốc độ STEP tối thiểu cho motor trong chế độ quỹ đạo (Hz). */
+#define MY_RUNNER_MIN_SPEED_HZ          100U
+
+/** @brief Tốc độ STEP tối đa cho motor trong chế độ quỹ đạo (Hz). */
+#define MY_RUNNER_MAX_SPEED_HZ          40000U
+
+/** @brief Chu kỳ thực thi mỗi sample quỹ đạo, tính bằng mili giây. */
+#define MY_RUNNER_TICK_MS               20U
+
 /* Cài đặt bộ lọc cảm biến ------------------------------------------------ */
 
 /** @brief Nhiễu quá trình Kalman khi MY_APP_SENSOR_FILTER_MODE là Kalman. */

@@ -59,6 +59,22 @@ uint8_t Command_ReadUsb(uint8_t *buffer, uint16_t buffer_size,
 bool Command_IsZeroCommand(const uint8_t *buffer, uint16_t length);
 
 /**
+ * @brief  Nhan dien lenh "GO" khong phan biet chu hoa, chu thuong.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @return true neu lenh bat dau thuc thi quy dao, nguoc lai false.
+ */
+bool Command_IsGoCommand(const uint8_t *buffer, uint16_t length);
+
+/**
+ * @brief  Nhan dien lenh "STOP" khong phan biet chu hoa, chu thuong.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @return true neu lenh dung khan cap quy dao, nguoc lai false.
+ */
+bool Command_IsStopCommand(const uint8_t *buffer, uint16_t length);
+
+/**
  * @brief  Phan tich lenh yaw dang so thap phan sang centi-do.
  * @param  buffer: Cac byte lenh nhan duoc.
  * @param  length: So byte trong buffer.

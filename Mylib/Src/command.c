@@ -185,6 +185,41 @@ uint8_t Command_ReadUsb(uint8_t *buffer, uint16_t buffer_size,
 }
 
 /**
+ * @brief  Ham dung chung: cat khoang trang dau/cuoi va tra ve vi tri dau/cuoi.
+ * @param  buffer:      Mang byte can cat.
+ * @param  length:      Do dai mang.
+ * @param  start_out:   Vi tri byte dau khong phai khoang trang.
+ * @param  end_out:     Vi tri sau byte cuoi khong phai khoang trang.
+ */
+static void command_trim(const uint8_t *buffer, uint16_t length,
+                         uint16_t *start_out, uint16_t *end_out)
+{
+    uint16_t start = 0U;
+    uint16_t end   = length;
+
+    while ((start < length) &&
+           ((buffer[start] == ' ')  ||
+            (buffer[start] == '\t') ||
+            (buffer[start] == '\r') ||
+            (buffer[start] == '\n')))
+    {
+        start++;
+    }
+
+    while ((end > start) &&
+           ((buffer[end - 1U] == ' ')  ||
+            (buffer[end - 1U] == '\t') ||
+            (buffer[end - 1U] == '\r') ||
+            (buffer[end - 1U] == '\n')))
+    {
+        end--;
+    }
+
+    *start_out = start;
+    *end_out   = end;
+}
+
+/**
  * @brief  Nhan dien lenh "zero" khong phan biet chu hoa, chu thuong.
  * @param  buffer: Cac byte lenh nhan duoc.
  * @param  length: So byte trong buffer.
@@ -225,6 +260,58 @@ bool Command_IsZeroCommand(const uint8_t *buffer, uint16_t length)
              (buffer[start_index + 2U] == 'R')) &&
             ((buffer[start_index + 3U] == 'o') ||
              (buffer[start_index + 3U] == 'O')));
+}
+
+/**
+ * @brief  Nhan dien lenh "GO" khong phan biet chu hoa, chu thuong.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @return true neu lenh bat dau thuc thi quy dao, nguoc lai false.
+ */
+bool Command_IsGoCommand(const uint8_t *buffer, uint16_t length)
+{
+    uint16_t start_index;
+    uint16_t end_index;
+
+    if ((buffer == NULL) || (length == 0U)) {
+        return false;
+    }
+
+    command_trim(buffer, length, &start_index, &end_index);
+
+    if ((end_index - start_index) != 2U) {
+        return false;
+    }
+
+    return (((buffer[start_index]      == 'g') || (buffer[start_index]      == 'G')) &&
+            ((buffer[start_index + 1U] == 'o') || (buffer[start_index + 1U] == 'O')));
+}
+
+/**
+ * @brief  Nhan dien lenh "STOP" khong phan biet chu hoa, chu thuong.
+ * @param  buffer: Cac byte lenh nhan duoc.
+ * @param  length: So byte trong buffer.
+ * @return true neu lenh dung khan cap quy dao, nguoc lai false.
+ */
+bool Command_IsStopCommand(const uint8_t *buffer, uint16_t length)
+{
+    uint16_t start_index;
+    uint16_t end_index;
+
+    if ((buffer == NULL) || (length == 0U)) {
+        return false;
+    }
+
+    command_trim(buffer, length, &start_index, &end_index);
+
+    if ((end_index - start_index) != 4U) {
+        return false;
+    }
+
+    return (((buffer[start_index]      == 's') || (buffer[start_index]      == 'S')) &&
+            ((buffer[start_index + 1U] == 't') || (buffer[start_index + 1U] == 'T')) &&
+            ((buffer[start_index + 2U] == 'o') || (buffer[start_index + 2U] == 'O')) &&
+            ((buffer[start_index + 3U] == 'p') || (buffer[start_index + 3U] == 'P')));
 }
 
 /**

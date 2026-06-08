@@ -360,6 +360,7 @@ TCA9548A_Status_t TCA9548A_ReadSensor(TCA9548A_Handle_t *mux,
  * @param[out] degrees: Noi luu goc theo do.
  * @return TCA9548A_OK neu doc thanh cong, nguoc lai tra ve ma loi.
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 TCA9548A_Status_t TCA9548A_ReadAngleDeg(TCA9548A_Handle_t *mux,
                                           TCA9548A_Channel_t ch,
                                           float *degrees)
@@ -384,6 +385,10 @@ TCA9548A_Status_t TCA9548A_ReadAngleDeg(TCA9548A_Handle_t *mux,
 
     return (as_ret == AS5600_OK) ? TCA9548A_OK : TCA9548A_ERR_SENSOR_FAIL;
 }
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
 
 /**
  * @brief  Quet va doc tat ca AS5600 da dang ky.

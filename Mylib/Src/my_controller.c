@@ -8,6 +8,7 @@
 #include "my_controller.h"
 #include "as5600.h"
 #include "i2c.h"
+#include "my_app.h"
 #include "my_config.h"
 #include "tca9548a.h"
 #include "tim.h"
@@ -36,53 +37,53 @@ TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
 /** @brief Nửa vòng quay, dùng để chọn sai lệch góc ngắn nhất. */
 #define MY_CONTROLLER_HALF_TURN_CDEG            18000L
 
-/** @brief Tốc độ mặc định cho motor yaw. */
-#define MY_CONTROLLER_MOTOR_SPEED_RPM           60.0f
+/** @brief Tan so STEP mac dinh cho motor yaw, tuong duong 60 RPM voi 200 step/vong va 16 microstep. */
+#define MY_CONTROLLER_MOTOR_SPEED_HZ            MY_APP_MOTOR_YAW_SPEED_HZ
 
-/** @brief Tốc độ mặc định cho lệnh chạy đồng thời ba motor. */
-#define MY_CONTROLLER_THREE_MOTOR_SPEED_RPM     60.0f
+/** @brief Tan so STEP mac dinh cho lenh chay dong thoi ba motor. */
+#define MY_CONTROLLER_THREE_MOTOR_SPEED_HZ      MY_APP_THREE_MOTOR_SPEED_HZ
 
 /** @brief Chiều thuận motor1 khi góc mục tiêu lớn hơn góc hiện tại. */
-#define MY_CONTROLLER_MOTOR1_FORWARD_DIR         TMC2209_DIR_CCW
+#define MY_CONTROLLER_MOTOR1_FORWARD_DIR         ((TMC2209_DirectionTypeDef)MY_APP_MOTOR1_FORWARD_DIR)
 
 /** @brief Tử số scale bước motor1 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM      90U
+#define MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM      MY_APP_MOTOR1_STEP_SCALE_NUM
 
 /** @brief Mẫu số scale bước motor1 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN      20U
+#define MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN      MY_APP_MOTOR1_STEP_SCALE_DEN
 
 /** @brief Chiều thuận motor2 khi góc mục tiêu lớn hơn góc hiện tại. */
-#define MY_CONTROLLER_MOTOR2_FORWARD_DIR         TMC2209_DIR_CW
+#define MY_CONTROLLER_MOTOR2_FORWARD_DIR         ((TMC2209_DirectionTypeDef)MY_APP_MOTOR2_FORWARD_DIR)
 
 /** @brief Tử số scale bước motor2 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM      91U
+#define MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM      MY_APP_MOTOR2_STEP_SCALE_NUM
 
 /** @brief Mẫu số scale bước motor2 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN      20U
+#define MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN      MY_APP_MOTOR2_STEP_SCALE_DEN
 
 /** @brief Chiều thuận motor3 khi góc mục tiêu lớn hơn góc hiện tại. */
-#define MY_CONTROLLER_MOTOR3_FORWARD_DIR         TMC2209_DIR_CCW
+#define MY_CONTROLLER_MOTOR3_FORWARD_DIR         ((TMC2209_DirectionTypeDef)MY_APP_MOTOR3_FORWARD_DIR)
 
 /** @brief Tử số scale bước motor3 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM      91U
+#define MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM      MY_APP_MOTOR3_STEP_SCALE_NUM
 
 /** @brief Mẫu số scale bước motor3 theo tỉ số truyền cơ khí. */
-#define MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN      20U
+#define MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN      MY_APP_MOTOR3_STEP_SCALE_DEN
 
 /** @brief Nhiễu quá trình giúp bộ lọc bám theo góc thật. */
-#define MY_CONTROLLER_KALMAN_PROCESS_NOISE      4.0f
+#define MY_CONTROLLER_KALMAN_PROCESS_NOISE      MY_APP_KALMAN_PROCESS_NOISE
 
 /** @brief Nhiễu đo giúp giảm rung góc đọc từ AS5600. */
-#define MY_CONTROLLER_KALMAN_MEASUREMENT_NOISE  64.0f
+#define MY_CONTROLLER_KALMAN_MEASUREMENT_NOISE  MY_APP_KALMAN_MEASUREMENT_NOISE
 
 /** @brief Hiệp phương sai ban đầu của bộ lọc Kalman. */
-#define MY_CONTROLLER_KALMAN_INITIAL_COVARIANCE 1000.0f
+#define MY_CONTROLLER_KALMAN_INITIAL_COVARIANCE MY_APP_KALMAN_INITIAL_COVARIANCE
 
 /** @brief Ngưỡng bám nhanh khi góc thật đổi lớn. */
-#define MY_CONTROLLER_KALMAN_FAST_TRACK_CDEG    1000.0f
+#define MY_CONTROLLER_KALMAN_FAST_TRACK_CDEG    MY_APP_KALMAN_FAST_TRACK_CDEG
 
 /** @brief Đặt khác 0 để bật lọc Kalman. */
-#define MY_CONTROLLER_USE_KALMAN_FILTER         0
+#define MY_CONTROLLER_USE_KALMAN_FILTER         MY_APP_SENSOR_FILTER_MODE
 
 /**
  * @brief  Trạng thái bộ lọc Kalman 1 chiều cho góc tuyệt đối AS5600.
@@ -137,11 +138,14 @@ static int8_t prv_I2cRead(uint8_t device_address,
 static void prv_DelayMs(uint32_t delay_ms);
 static void prv_KalmanReset(my_controller_kalman_filter_t *filter);
 static int32_t prv_NormalizeAbsoluteCdeg(int32_t angle_cdeg);
-#if (MY_CONTROLLER_USE_KALMAN_FILTER != 0)
+#if (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_KALMAN)
 static float prv_CalculateShortestAngleErrorCdeg(float reference_cdeg,
                                                  int32_t sample_cdeg);
 static int32_t prv_KalmanUpdate(my_controller_kalman_filter_t *filter,
                                 int32_t sample_cdeg);
+#elif (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_NONE)
+#else
+#error "Invalid MY_APP_SENSOR_FILTER_MODE setting"
 #endif
 static int32_t prv_NormalizeSensorYawCdeg(int32_t sensor_angle_cdeg);
 static int32_t prv_ConvertSensorAngleCdeg(const AS5600_Data_t *data);
@@ -300,7 +304,7 @@ static int32_t prv_NormalizeAbsoluteCdeg(int32_t angle_cdeg)
     return angle_cdeg;
 }
 
-#if (MY_CONTROLLER_USE_KALMAN_FILTER != 0)
+#if (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_KALMAN)
 /**
  * @brief  Tính sai lệch góc ngắn nhất giữa ước lượng và mẫu đo mới.
  * @param  reference_cdeg: Góc ước lượng hiện tại, tính bằng centi-độ.
@@ -379,6 +383,9 @@ static int32_t prv_KalmanUpdate(my_controller_kalman_filter_t *filter,
 
     return (int32_t)(filter->estimate_cdeg + 0.5f);
 }
+#elif (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_NONE)
+#else
+#error "Invalid MY_APP_SENSOR_FILTER_MODE setting"
 #endif
 
 /**
@@ -737,11 +744,13 @@ MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
         return MY_CONTROLLER_ERR_SENSOR;
     }
 
-#if (MY_CONTROLLER_USE_KALMAN_FILTER != 0)
+#if (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_KALMAN)
     *sensor_angle_cdeg = prv_KalmanUpdate(&s_sensor_filter,
                                           *sensor_angle_cdeg);
-#else
+#elif (MY_CONTROLLER_USE_KALMAN_FILTER == MY_APP_SENSOR_FILTER_NONE)
     *sensor_angle_cdeg = prv_NormalizeAbsoluteCdeg(*sensor_angle_cdeg);
+#else
+#error "Invalid MY_APP_SENSOR_FILTER_MODE setting"
 #endif
     return MY_CONTROLLER_OK;
 }
@@ -860,7 +869,7 @@ MyController_Status_t MyController_StartTargetMove(
     motor_status = TMC2209_MoveSteps(&motor3,
                                      move_steps,
                                      prv_GetDirectionFromDelta(move_delta_cdeg),
-                                     MY_CONTROLLER_MOTOR_SPEED_RPM);
+                                     MY_CONTROLLER_MOTOR_SPEED_HZ);
     if (motor_status != TMC2209_OK) {
         return MY_CONTROLLER_ERR_MOTOR;
     }
@@ -925,7 +934,7 @@ MyController_Status_t MyController_StartThreeMotorMove(
         motor_status = TMC2209_MoveSteps(&motor1,
                                          context->motor1_target_steps,
                                          motor_direction,
-                                         MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
+                                         MY_CONTROLLER_THREE_MOTOR_SPEED_HZ);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
             return MY_CONTROLLER_ERR_MOTOR;
@@ -939,7 +948,7 @@ MyController_Status_t MyController_StartThreeMotorMove(
         motor_status = TMC2209_MoveSteps(&motor2,
                                          context->motor2_target_steps,
                                          motor_direction,
-                                         MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
+                                         MY_CONTROLLER_THREE_MOTOR_SPEED_HZ);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
             return MY_CONTROLLER_ERR_MOTOR;
@@ -953,7 +962,7 @@ MyController_Status_t MyController_StartThreeMotorMove(
         motor_status = TMC2209_MoveSteps(&motor3,
                                          context->motor3_target_steps,
                                          motor_direction,
-                                         MY_CONTROLLER_THREE_MOTOR_SPEED_RPM);
+                                         MY_CONTROLLER_THREE_MOTOR_SPEED_HZ);
         if (motor_status != TMC2209_OK) {
             prv_StopThreeMotors();
             return MY_CONTROLLER_ERR_MOTOR;

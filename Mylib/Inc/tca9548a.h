@@ -237,9 +237,14 @@ TCA9548A_Status_t TCA9548A_ReadSensor(TCA9548A_Handle_t *mux,
  * @param degrees   Giá trị góc (0.0 - 360.0)
  * @return TCA9548A_OK nếu thành công
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 TCA9548A_Status_t TCA9548A_ReadAngleDeg(TCA9548A_Handle_t *mux,
                                           TCA9548A_Channel_t ch,
                                           float *degrees);
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
  
 /**
  * @brief Quét và đọc tất cả AS5600 đã đăng ký

@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "my_app.h"
  
 #ifdef __cplusplus
 extern "C" {
@@ -263,7 +264,12 @@ AS5600_Status_t AS5600_ReadRawAngle(AS5600_Handle_t *dev, uint16_t *raw_angle);
  * @param degrees   Giá trị góc (0.0 - 360.0)
  * @return AS5600_OK nếu thành công
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 AS5600_Status_t AS5600_ReadAngleDeg(AS5600_Handle_t *dev, float *degrees);
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
  
 /**
  * @brief Kiểm tra trạng thái nam châm
@@ -316,6 +322,7 @@ AS5600_Status_t AS5600_IsConnected(AS5600_Handle_t *dev);
  * @param raw   Giá trị 12-bit (0-4095)
  * @return Góc tính theo độ (0.0 - 360.0)
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 float AS5600_RawToDegrees(uint16_t raw);
  
 /**
@@ -324,6 +331,10 @@ float AS5600_RawToDegrees(uint16_t raw);
  * @return Góc tính theo radian (0 - 2π)
  */
 float AS5600_RawToRadians(uint16_t raw);
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
  
 #ifdef __cplusplus
 }

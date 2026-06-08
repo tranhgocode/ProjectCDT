@@ -10,7 +10,6 @@
 #include "command.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 
 /**
  * @brief  Cac trang thai chinh cua may trang thai ung dung.
@@ -49,6 +48,104 @@ static bool my_app_start_three_motor_move(
 static void my_app_process_usb_command(void);
 static void my_app_process_motor_done(void);
 static void my_app_process_three_motor_done(void);
+static void my_app_append_char(char *buffer,
+                               uint16_t buffer_size,
+                               uint16_t *index,
+                               char value);
+static void my_app_append_text(char *buffer,
+                               uint16_t buffer_size,
+                               uint16_t *index,
+                               const char *text);
+static void my_app_append_unsigned(char *buffer,
+                                   uint16_t buffer_size,
+                                   uint16_t *index,
+                                   uint32_t value);
+static void my_app_append_signed(char *buffer,
+                                 uint16_t buffer_size,
+                                 uint16_t *index,
+                                 int32_t value);
+
+/**
+ * @brief  Them mot ky tu vao report USB neu bo dem con cho.
+ */
+static void my_app_append_char(char *buffer,
+                               uint16_t buffer_size,
+                               uint16_t *index,
+                               char value)
+{
+    if ((buffer == NULL) || (index == NULL) || (buffer_size == 0U)) {
+        return;
+    }
+
+    if (*index < (uint16_t)(buffer_size - 1U)) {
+        buffer[*index] = value;
+        (*index)++;
+        buffer[*index] = '\0';
+    }
+}
+
+/**
+ * @brief  Them chuoi vao report USB neu bo dem con cho.
+ */
+static void my_app_append_text(char *buffer,
+                               uint16_t buffer_size,
+                               uint16_t *index,
+                               const char *text)
+{
+    uint16_t text_index = 0U;
+
+    if (text == NULL) {
+        return;
+    }
+
+    while (text[text_index] != '\0') {
+        my_app_append_char(buffer, buffer_size, index, text[text_index]);
+        text_index++;
+    }
+}
+
+/**
+ * @brief  Them so nguyen duong dang thap phan, khong dung printf.
+ */
+static void my_app_append_unsigned(char *buffer,
+                                   uint16_t buffer_size,
+                                   uint16_t *index,
+                                   uint32_t value)
+{
+    char digits[10];
+    uint8_t digit_count = 0U;
+
+    do {
+        digits[digit_count] = (char)('0' + (value % 10U));
+        digit_count++;
+        value /= 10U;
+    } while ((value > 0U) && (digit_count < sizeof(digits)));
+
+    while (digit_count > 0U) {
+        digit_count--;
+        my_app_append_char(buffer, buffer_size, index, digits[digit_count]);
+    }
+}
+
+/**
+ * @brief  Them so nguyen co dau dang thap phan, khong dung printf.
+ */
+static void my_app_append_signed(char *buffer,
+                                 uint16_t buffer_size,
+                                 uint16_t *index,
+                                 int32_t value)
+{
+    uint32_t abs_value;
+
+    if (value < 0) {
+        my_app_append_char(buffer, buffer_size, index, '-');
+        abs_value = (uint32_t)(-value);
+    } else {
+        abs_value = (uint32_t)value;
+    }
+
+    my_app_append_unsigned(buffer, buffer_size, index, abs_value);
+}
 
 /**
  * @brief  Dat goc cam bien hien tai lam yaw zero va bao ket qua qua USB.
@@ -186,7 +283,7 @@ static void my_app_process_motor_done(void)
 {
     MyController_MoveResult_t move_result;
     MyController_Status_t controller_status;
-    int32_t report_length;
+    uint16_t report_length = 0U;
     char input_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char start_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char end_angle_text[COMMAND_ANGLE_TEXT_SIZE];
@@ -227,22 +324,65 @@ static void my_app_process_motor_done(void)
                            error_angle_text,
                            sizeof(error_angle_text));
 
-    report_length = snprintf(s_usb_tx_buffer,
-                             sizeof(s_usb_tx_buffer),
-                             "input_deg=%s,start_deg=%s,end_deg=%s,"
-                             "delta_deg=%s,error_deg=%s,steps=%lu\r\n",
-                             input_angle_text,
-                             start_angle_text,
-                             end_angle_text,
-                             delta_angle_text,
-                             error_angle_text,
-                             (unsigned long)s_move_context.target_steps);
+    s_usb_tx_buffer[0] = '\0';
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       "input_deg=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       input_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",start_deg=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       start_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",end_deg=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       end_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",delta_deg=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       delta_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",error_deg=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       error_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",steps=");
+    my_app_append_unsigned(s_usb_tx_buffer,
+                           sizeof(s_usb_tx_buffer),
+                           &report_length,
+                           s_move_context.target_steps);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       "\r\n");
 
     // Giu nguyen ten truong vi read_uart.py dang dung format nay de ghi CSV.
-    if ((report_length > 0) &&
-        (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
+    if ((report_length > 0U) &&
+        (report_length < (uint16_t)sizeof(s_usb_tx_buffer))) {
         Command_UsbSendBuffer((uint8_t *)s_usb_tx_buffer,
-                              (uint16_t)report_length);
+                              report_length);
     }
 
     s_app_state = MY_APP_STATE_WAIT_COMMAND;
@@ -255,7 +395,7 @@ static void my_app_process_three_motor_done(void)
 {
     MyController_Status_t controller_status;
     MyController_ThreeSensorReadout_t sensor_readout;
-    int32_t report_length;
+    uint16_t report_length = 0U;
     char motor1_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char motor2_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char motor3_angle_text[COMMAND_ANGLE_TEXT_SIZE];
@@ -265,9 +405,9 @@ static void my_app_process_three_motor_done(void)
     char sensor1_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char sensor2_angle_text[COMMAND_ANGLE_TEXT_SIZE];
     char sensor3_angle_text[COMMAND_ANGLE_TEXT_SIZE];
-    unsigned long motor1_steps;
-    unsigned long motor2_steps;
-    unsigned long motor3_steps;
+    uint32_t motor1_steps;
+    uint32_t motor2_steps;
+    uint32_t motor3_steps;
 
     if (MyController_IsThreeMotorMoveRunning() == true) {
         return;
@@ -318,38 +458,140 @@ static void my_app_process_three_motor_done(void)
                                 sensor_readout.sensor3_status,
                                 sensor3_angle_text,
                                 sizeof(sensor3_angle_text));
-    motor1_steps = (unsigned long)s_three_motor_context.motor1_target_steps;
-    motor2_steps = (unsigned long)s_three_motor_context.motor2_target_steps;
-    motor3_steps = (unsigned long)s_three_motor_context.motor3_target_steps;
+    motor1_steps = s_three_motor_context.motor1_target_steps;
+    motor2_steps = s_three_motor_context.motor2_target_steps;
+    motor3_steps = s_three_motor_context.motor3_target_steps;
 
-    report_length = snprintf(s_usb_tx_buffer,
-                             sizeof(s_usb_tx_buffer),
-                             "three_ok,m1_t=%s,m1_d=%s,m1_s=%lu,"
-                             "m2_t=%s,m2_d=%s,m2_s=%lu,"
-                             "m3_t=%s,m3_d=%s,m3_s=%lu,"
-                             "as1=%s,as1_st=%d,"
-                             "as2=%s,as2_st=%d,"
-                             "as3=%s,as3_st=%d\r\n",
-                             motor1_angle_text,
-                             motor1_delta_text,
-                             motor1_steps,
-                             motor2_angle_text,
-                             motor2_delta_text,
-                             motor2_steps,
-                             motor3_angle_text,
-                             motor3_delta_text,
-                             motor3_steps,
-                             sensor1_angle_text,
-                             (int)sensor_readout.sensor1_status,
-                             sensor2_angle_text,
-                             (int)sensor_readout.sensor2_status,
-                             sensor3_angle_text,
-                             (int)sensor_readout.sensor3_status);
+    s_usb_tx_buffer[0] = '\0';
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       "three_ok,m1_t=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor1_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m1_d=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor1_delta_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m1_s=");
+    my_app_append_unsigned(s_usb_tx_buffer,
+                           sizeof(s_usb_tx_buffer),
+                           &report_length,
+                           motor1_steps);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m2_t=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor2_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m2_d=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor2_delta_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m2_s=");
+    my_app_append_unsigned(s_usb_tx_buffer,
+                           sizeof(s_usb_tx_buffer),
+                           &report_length,
+                           motor2_steps);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m3_t=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor3_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m3_d=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       motor3_delta_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",m3_s=");
+    my_app_append_unsigned(s_usb_tx_buffer,
+                           sizeof(s_usb_tx_buffer),
+                           &report_length,
+                           motor3_steps);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as1=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       sensor1_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as1_st=");
+    my_app_append_signed(s_usb_tx_buffer,
+                         sizeof(s_usb_tx_buffer),
+                         &report_length,
+                         (int32_t)sensor_readout.sensor1_status);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as2=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       sensor2_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as2_st=");
+    my_app_append_signed(s_usb_tx_buffer,
+                         sizeof(s_usb_tx_buffer),
+                         &report_length,
+                         (int32_t)sensor_readout.sensor2_status);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as3=");
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       sensor3_angle_text);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       ",as3_st=");
+    my_app_append_signed(s_usb_tx_buffer,
+                         sizeof(s_usb_tx_buffer),
+                         &report_length,
+                         (int32_t)sensor_readout.sensor3_status);
+    my_app_append_text(s_usb_tx_buffer,
+                       sizeof(s_usb_tx_buffer),
+                       &report_length,
+                       "\r\n");
 
-    if ((report_length > 0) &&
-        (report_length < (int32_t)sizeof(s_usb_tx_buffer))) {
+    if ((report_length > 0U) &&
+        (report_length < (uint16_t)sizeof(s_usb_tx_buffer))) {
         Command_UsbSendBuffer((uint8_t *)s_usb_tx_buffer,
-                              (uint16_t)report_length);
+                              report_length);
     }
 
     s_app_state = MY_APP_STATE_WAIT_COMMAND;

@@ -10,7 +10,6 @@
 #include "usbd_cdc.h"
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
@@ -22,6 +21,104 @@ static bool command_parse_angle_field_cdeg(const uint8_t *buffer,
                                            uint16_t length,
                                            uint16_t *index,
                                            int32_t *angle_cdeg);
+static void command_append_char(char *buffer,
+                                uint16_t buffer_size,
+                                uint16_t *index,
+                                char value);
+static void command_append_text(char *buffer,
+                                uint16_t buffer_size,
+                                uint16_t *index,
+                                const char *text);
+static void command_append_unsigned(char *buffer,
+                                    uint16_t buffer_size,
+                                    uint16_t *index,
+                                    uint32_t value);
+static void command_append_signed(char *buffer,
+                                  uint16_t buffer_size,
+                                  uint16_t *index,
+                                  int32_t value);
+
+/**
+ * @brief  Them mot ky tu vao chuoi dich neu con cho.
+ */
+static void command_append_char(char *buffer,
+                                uint16_t buffer_size,
+                                uint16_t *index,
+                                char value)
+{
+    if ((buffer == NULL) || (index == NULL) || (buffer_size == 0U)) {
+        return;
+    }
+
+    if (*index < (uint16_t)(buffer_size - 1U)) {
+        buffer[*index] = value;
+        (*index)++;
+        buffer[*index] = '\0';
+    }
+}
+
+/**
+ * @brief  Them chuoi ket thuc null vao chuoi dich neu con cho.
+ */
+static void command_append_text(char *buffer,
+                                uint16_t buffer_size,
+                                uint16_t *index,
+                                const char *text)
+{
+    uint16_t text_index = 0U;
+
+    if (text == NULL) {
+        return;
+    }
+
+    while (text[text_index] != '\0') {
+        command_append_char(buffer, buffer_size, index, text[text_index]);
+        text_index++;
+    }
+}
+
+/**
+ * @brief  Them so nguyen duong dang thap phan, khong dung printf.
+ */
+static void command_append_unsigned(char *buffer,
+                                    uint16_t buffer_size,
+                                    uint16_t *index,
+                                    uint32_t value)
+{
+    char digits[10];
+    uint8_t digit_count = 0U;
+
+    do {
+        digits[digit_count] = (char)('0' + (value % 10U));
+        digit_count++;
+        value /= 10U;
+    } while ((value > 0U) && (digit_count < sizeof(digits)));
+
+    while (digit_count > 0U) {
+        digit_count--;
+        command_append_char(buffer, buffer_size, index, digits[digit_count]);
+    }
+}
+
+/**
+ * @brief  Them so nguyen co dau dang thap phan, khong dung printf.
+ */
+static void command_append_signed(char *buffer,
+                                  uint16_t buffer_size,
+                                  uint16_t *index,
+                                  int32_t value)
+{
+    uint32_t abs_value;
+
+    if (value < 0) {
+        command_append_char(buffer, buffer_size, index, '-');
+        abs_value = (uint32_t)(-value);
+    } else {
+        abs_value = (uint32_t)value;
+    }
+
+    command_append_unsigned(buffer, buffer_size, index, abs_value);
+}
 
 /**
  * @brief  Kiem tra USB CDC da cau hinh va san sang truyen goi moi chua.
@@ -363,10 +460,13 @@ void Command_FormatAngleDeg(int32_t angle_cdeg,
     uint32_t angle_abs_cdeg;
     uint32_t angle_whole_deg;
     uint32_t angle_frac_cdeg;
+    uint16_t index = 0U;
 
     if ((buffer == NULL) || (buffer_size == 0U)) {
         return;
     }
+
+    buffer[0] = '\0';
 
     angle_abs_cdeg = (angle_cdeg < 0) ?
         (uint32_t)(-angle_cdeg) :
@@ -376,18 +476,19 @@ void Command_FormatAngleDeg(int32_t angle_cdeg,
     angle_frac_cdeg = angle_abs_cdeg % 100U;
 
     if (angle_cdeg < 0) {
-        (void)snprintf(buffer,
-                       buffer_size,
-                       "-%lu.%02lu",
-                       (unsigned long)angle_whole_deg,
-                       (unsigned long)angle_frac_cdeg);
-    } else {
-        (void)snprintf(buffer,
-                       buffer_size,
-                       "%lu.%02lu",
-                       (unsigned long)angle_whole_deg,
-                       (unsigned long)angle_frac_cdeg);
+        command_append_char(buffer, buffer_size, &index, '-');
     }
+
+    command_append_unsigned(buffer, buffer_size, &index, angle_whole_deg);
+    command_append_char(buffer, buffer_size, &index, '.');
+    command_append_char(buffer,
+                        buffer_size,
+                        &index,
+                        (char)('0' + ((angle_frac_cdeg / 10U) % 10U)));
+    command_append_char(buffer,
+                        buffer_size,
+                        &index,
+                        (char)('0' + (angle_frac_cdeg % 10U)));
 }
 
 /**
@@ -411,5 +512,11 @@ void Command_FormatSensorReadout(int32_t angle_cdeg,
         return;
     }
 
-    (void)snprintf(buffer, buffer_size, "ERR%d", (int)sensor_status);
+    uint16_t index = 0U;
+    buffer[0] = '\0';
+    command_append_text(buffer, buffer_size, &index, "ERR");
+    command_append_signed(buffer,
+                          buffer_size,
+                          &index,
+                          (int32_t)sensor_status);
 }

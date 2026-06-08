@@ -6,7 +6,8 @@
  */
 
 #include "as5600.h"
-#include <math.h>
+#include "my_app.h"
+#include <stddef.h>
 
 /* Private defines ---------------------------------------------------------- */
 
@@ -218,9 +219,16 @@ AS5600_Status_t AS5600_ReadAll(AS5600_Handle_t *dev, AS5600_Data_t *data)
     if (ret != AS5600_OK) return ret;
     data->angle = angle & 0x0FFF;
 
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
     /* Luu san don vi thong dung de tang tinh tien dung cho lop ung dung. */
     data->angle_deg = AS5600_RawToDegrees(data->angle);
     data->angle_rad = AS5600_RawToRadians(data->angle);
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+    data->angle_deg = 0.0f;
+    data->angle_rad = 0.0f;
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
 
     ret = _read_reg(dev, AS5600_REG_AGC, &agc);
     if (ret != AS5600_OK) return ret;
@@ -284,6 +292,7 @@ AS5600_Status_t AS5600_ReadRawAngle(AS5600_Handle_t *dev, uint16_t *raw_angle)
  * @param[out] degrees: Noi luu goc theo do, xap xi 0.0 den 360.0.
  * @return AS5600_OK neu doc thanh cong, nguoc lai tra ve ma loi.
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 AS5600_Status_t AS5600_ReadAngleDeg(AS5600_Handle_t *dev, float *degrees)
 {
     AS5600_Status_t ret;
@@ -298,6 +307,10 @@ AS5600_Status_t AS5600_ReadAngleDeg(AS5600_Handle_t *dev, float *degrees)
     dev->data.angle_deg = *degrees;
     return AS5600_OK;
 }
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif
 
 /**
  * @brief  Doc va phan loai trang thai nam cham.
@@ -420,6 +433,7 @@ AS5600_Status_t AS5600_IsConnected(AS5600_Handle_t *dev)
  * @param[in] raw: Gia tri raw 12-bit cua AS5600.
  * @return Goc theo do, xap xi 0.0 den 360.0.
  */
+#if (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_ENABLED)
 float AS5600_RawToDegrees(uint16_t raw)
 {
     return (float)(raw & 0x0FFF) * AS5600_DEG_PER_RAW;
@@ -434,3 +448,7 @@ float AS5600_RawToRadians(uint16_t raw)
 {
     return (float)(raw & 0x0FFF) * AS5600_RAD_PER_RAW;
 }
+#elif (MY_APP_AS5600_FLOAT_UNITS == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_AS5600_FLOAT_UNITS setting"
+#endif

@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "my_app.h"
 #include "main.h"
 #include "stm32f1xx_hal.h"
 
@@ -222,7 +223,12 @@ TMC2209_StatusTypeDef TMC2209_SetSpeedHz(TMC2209_HandleTypeDef *hmotor, uint32_t
 /**
  * @brief  Dat toc do theo vong/phut (RPM)
  */
+#if (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_ENABLED)
 TMC2209_StatusTypeDef TMC2209_SetSpeedRPM(TMC2209_HandleTypeDef *hmotor, float rpm);
+#elif (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_API setting"
+#endif
  
 /**
  * @brief  Bat dau quay (start PWM)
@@ -240,12 +246,17 @@ void TMC2209_Stop(TMC2209_HandleTypeDef *hmotor);
  * @brief  Quay them N buoc (khong blocking)
  *         Goi TMC2209_UpdateSteps() trong interrupt dem buoc de biet khi nao dung
  */
-TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor, uint32_t steps, TMC2209_DirectionTypeDef dir, float speed_rpm);
+TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor, uint32_t steps, TMC2209_DirectionTypeDef dir, uint32_t speed_hz);
  
 /**
  * @brief  Quay den goc tuyet doi (do, 0..360)
  */
+#if (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_ENABLED)
 TMC2209_StatusTypeDef TMC2209_MoveToAngle(TMC2209_HandleTypeDef *hmotor, float angle_deg, float speed_rpm);
+#elif (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_API setting"
+#endif
  
 /**
  * @brief  Goi trong Timer Period Elapsed ISR hoac PWM Pulse Finished ISR
@@ -296,6 +307,7 @@ TMC2209_StatusTypeDef TMC2209_ReadReg(TMC2209_HandleTypeDef *hmotor, uint8_t reg
  * @brief  Tinh tan so xung tuong ung voi RPM
  *         freq = (RPM * steps_per_rev * microstep) / 60
  */
+#if (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_ENABLED)
 static inline uint32_t TMC2209_RPM_to_Hz(const TMC2209_HandleTypeDef *hmotor, float rpm)
 {
     return (uint32_t)((rpm * (float)hmotor->steps_per_rev * (float)hmotor->microstep) / 60.0f);
@@ -308,6 +320,10 @@ static inline float TMC2209_Hz_to_RPM(const TMC2209_HandleTypeDef *hmotor, uint3
 {
     return ((float)hz * 60.0f) / ((float)hmotor->steps_per_rev * (float)hmotor->microstep);
 }
+#elif (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_API setting"
+#endif
 
 
 

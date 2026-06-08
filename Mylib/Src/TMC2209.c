@@ -351,6 +351,7 @@ TMC2209_StatusTypeDef TMC2209_SetSpeedHz(TMC2209_HandleTypeDef *hmotor,
     return _TMC2209_SetPWMFreq(hmotor, freq_hz);
 }
 
+#if (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_ENABLED)
 /**
  * @brief  Dat toc do bang RPM.
  * @param[in,out] hmotor: Con tro den handle TMC2209.
@@ -365,6 +366,10 @@ TMC2209_StatusTypeDef TMC2209_SetSpeedRPM(TMC2209_HandleTypeDef *hmotor,
     if (hz == 0U) hz = 1U;
     return _TMC2209_SetPWMFreq(hmotor, hz);
 }
+#elif (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_API setting"
+#endif
 
 /* Public functions: motion control ---------------------------------------- */
 
@@ -396,23 +401,23 @@ void TMC2209_Stop(TMC2209_HandleTypeDef *hmotor)
 }
 
 /**
- * @brief  Chay motor them mot so buoc theo chieu va toc do chi dinh.
+ * @brief  Chay motor them mot so buoc theo chieu va tan so STEP chi dinh.
  * @param[in,out] hmotor: Con tro den handle TMC2209.
  * @param[in] steps: So xung STEP can phat.
  * @param[in] dir: Chieu quay.
- * @param[in] speed_rpm: Toc do chay, tinh bang RPM.
+ * @param[in] speed_hz: Tan so xung STEP, tinh bang Hz.
  * @return TMC2209_OK neu lenh chay duoc start thanh cong.
  */
 TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor,
                                         uint32_t steps,
                                         TMC2209_DirectionTypeDef dir,
-                                        float speed_rpm)
+                                        uint32_t speed_hz)
 {
     TMC2209_StatusTypeDef ret;
 
     TMC2209_SetDirection(hmotor, dir);
 
-    ret = TMC2209_SetSpeedRPM(hmotor, speed_rpm);
+    ret = TMC2209_SetSpeedHz(hmotor, speed_hz);
     if (ret != TMC2209_OK) return ret;
 
     hmotor->target_steps  = steps;
@@ -421,6 +426,7 @@ TMC2209_StatusTypeDef TMC2209_MoveSteps(TMC2209_HandleTypeDef *hmotor,
     return TMC2209_Start(hmotor);
 }
 
+#if (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_ENABLED)
 /**
  * @brief  Chay motor den goc tuyet doi trong cache handle.
  * @param[in,out] hmotor: Con tro den handle TMC2209.
@@ -454,8 +460,13 @@ TMC2209_StatusTypeDef TMC2209_MoveToAngle(TMC2209_HandleTypeDef *hmotor,
 
     hmotor->target_angle = angle_deg;
 
-    return TMC2209_MoveSteps(hmotor, steps, dir, speed_rpm);
+    return TMC2209_MoveSteps(hmotor, steps, dir,
+                             TMC2209_RPM_to_Hz(hmotor, speed_rpm));
 }
+#elif (MY_APP_TMC2209_FLOAT_API == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_API setting"
+#endif
 
 /**
  * @brief  Cap nhat bo dem buoc, goi tu callback ngat timer.
@@ -476,6 +487,7 @@ bool TMC2209_UpdateSteps(TMC2209_HandleTypeDef *hmotor)
     {
         TMC2209_Stop(hmotor);
 
+#if (MY_APP_TMC2209_FLOAT_ANGLE_CACHE == MY_APP_MODULE_ENABLED)
         /* Cap nhat cache goc dua tren so buoc vua phat ra. */
         float delta_deg = ((float)hmotor->target_steps /
                            ((float)hmotor->steps_per_rev * (float)hmotor->microstep)) * 360.0f;
@@ -488,6 +500,10 @@ bool TMC2209_UpdateSteps(TMC2209_HandleTypeDef *hmotor)
         /* Giu cache goc trong mien [0, 360). */
         while (hmotor->current_angle <   0.0f)   hmotor->current_angle += 360.0f;
         while (hmotor->current_angle >= 360.0f)  hmotor->current_angle -= 360.0f;
+#elif (MY_APP_TMC2209_FLOAT_ANGLE_CACHE == MY_APP_MODULE_DISABLED)
+#else
+#error "Invalid MY_APP_TMC2209_FLOAT_ANGLE_CACHE setting"
+#endif
 
         hmotor->target_steps  = 0U;
         hmotor->current_steps = 0U;

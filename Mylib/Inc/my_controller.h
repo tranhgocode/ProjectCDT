@@ -139,6 +139,12 @@ MyController_Status_t MyController_ReadThreeSensors(
     MyController_ThreeSensorReadout_t *readout);
 
 /**
+ * @brief  Lay goc hien tai cua ba AS5600 lam moc 0.00 do moi.
+ * @return MY_CONTROLLER_OK neu doc duoc ca ba cam bien.
+ */
+MyController_Status_t MyController_ResetThreeSensorZero(void);
+
+/**
  * @brief  Bắt đầu chạy motor yaw tới góc mục tiêu.
  * @param  target_yaw_cdeg: Góc yaw mục tiêu tuyệt đối, tính bằng centi-độ.
  * @param  context: Nơi lưu dữ liệu cần dùng khi kết thúc lệnh chạy.

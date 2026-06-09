@@ -340,6 +340,7 @@ static void my_app_process_three_motor_done(void)
         Command_UsbSendBuffer((uint8_t *)s_usb_tx_buffer, s_report_length);
     }
 
+    (void)MyController_ResetThreeSensorZero();
     s_app_state = MY_APP_STATE_WAIT_COMMAND;
 }
 

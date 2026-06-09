@@ -111,6 +111,10 @@ static AS5600_Data_t s_sensor3_data;
 /** @brief Góc tuyệt đối được chọn làm yaw zero. */
 static int32_t s_sensor_zero_cdeg = 0;
 
+static int32_t s_sensor1_zero_cdeg = 0;
+static int32_t s_sensor2_zero_cdeg = 0;
+static int32_t s_sensor3_zero_cdeg = 0;
+
 /** @brief Góc yaw phần mềm sau lệnh gần nhất. */
 static int32_t s_current_yaw_cdeg = 0;
 
@@ -153,6 +157,11 @@ static TCA9548A_Status_t prv_ReadSensorAngleCdeg(
     TCA9548A_Channel_t channel,
     AS5600_Data_t *data,
     int32_t *angle_cdeg);
+static int32_t prv_CalculateShortestThreeSensorDeltaCdeg(int32_t zero_cdeg,
+                                                         int32_t angle_cdeg);
+static int32_t prv_ScaleSensorDeltaCdeg(int32_t delta_cdeg,
+                                        uint32_t numerator,
+                                        uint32_t denominator);
 static TMC2209_DirectionTypeDef prv_GetDirectionFromDelta(int32_t delta_cdeg);
 static TMC2209_DirectionTypeDef prv_GetOppositeDirection(
     TMC2209_DirectionTypeDef direction);
@@ -451,6 +460,47 @@ static TCA9548A_Status_t prv_ReadSensorAngleCdeg(
     return TCA9548A_OK;
 }
 
+static int32_t prv_CalculateShortestThreeSensorDeltaCdeg(int32_t zero_cdeg,
+                                                         int32_t angle_cdeg)
+{
+    int32_t delta_cdeg = angle_cdeg - zero_cdeg;
+
+    while (delta_cdeg > MY_CONTROLLER_HALF_TURN_CDEG) {
+        delta_cdeg -= MY_CONTROLLER_FULL_TURN_CDEG;
+    }
+
+    while (delta_cdeg < -MY_CONTROLLER_HALF_TURN_CDEG) {
+        delta_cdeg += MY_CONTROLLER_FULL_TURN_CDEG;
+    }
+
+    return delta_cdeg;
+}
+
+static int32_t prv_ScaleSensorDeltaCdeg(int32_t delta_cdeg,
+                                        uint32_t numerator,
+                                        uint32_t denominator)
+{
+    uint32_t abs_delta_cdeg;
+    uint32_t scaled_abs_cdeg;
+
+    if ((delta_cdeg == 0) || (numerator == 0U)) {
+        return 0;
+    }
+
+    abs_delta_cdeg = (delta_cdeg < 0) ?
+        (uint32_t)(-delta_cdeg) :
+        (uint32_t)delta_cdeg;
+
+    scaled_abs_cdeg = (uint32_t)((((uint64_t)abs_delta_cdeg *
+                                   (uint64_t)denominator) +
+                                  ((uint64_t)numerator / 2U)) /
+                                 (uint64_t)numerator);
+
+    return (delta_cdeg < 0) ?
+        -(int32_t)scaled_abs_cdeg :
+        (int32_t)scaled_abs_cdeg;
+}
+
 /**
  * @brief  Chuyển delta chuyển động có dấu sang hướng quay motor.
  * @param  delta_cdeg: Góc chạy tương đối, tính bằng centi-độ.
@@ -675,6 +725,9 @@ MyController_Status_t MyController_Init(void)
     s_mux.delay_ms = prv_DelayMs;
 
     s_sensor_zero_cdeg = 0;
+    s_sensor1_zero_cdeg = 0;
+    s_sensor2_zero_cdeg = 0;
+    s_sensor3_zero_cdeg = 0;
     s_current_yaw_cdeg = 0;
     prv_KalmanReset(&s_sensor_filter);
 
@@ -704,6 +757,10 @@ MyController_Status_t MyController_Init(void)
         return MY_CONTROLLER_ERR_SENSOR;
     }
 
+    if (MyController_ResetThreeSensorZero() != MY_CONTROLLER_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
     return MY_CONTROLLER_OK;
 }
 
@@ -723,6 +780,36 @@ MyController_Status_t MyController_SetZeroFromSensor(void)
     // Zero là mốc phần mềm để tránh ghi vào OTP hoặc register của AS5600.
     s_sensor_zero_cdeg = sensor_angle_cdeg;
     s_current_yaw_cdeg = 0;
+    return MY_CONTROLLER_OK;
+}
+
+MyController_Status_t MyController_ResetThreeSensorZero(void)
+{
+    int32_t sensor1_angle_cdeg = 0;
+    int32_t sensor2_angle_cdeg = 0;
+    int32_t sensor3_angle_cdeg = 0;
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR1_CHANNEL,
+                                &s_sensor1_data,
+                                &sensor1_angle_cdeg) != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR2_CHANNEL,
+                                &s_sensor2_data,
+                                &sensor2_angle_cdeg) != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    if (prv_ReadSensorAngleCdeg(MY_CONTROLLER_SENSOR3_CHANNEL,
+                                &s_sensor3_data,
+                                &sensor3_angle_cdeg) != TCA9548A_OK) {
+        return MY_CONTROLLER_ERR_SENSOR;
+    }
+
+    s_sensor1_zero_cdeg = sensor1_angle_cdeg;
+    s_sensor2_zero_cdeg = sensor2_angle_cdeg;
+    s_sensor3_zero_cdeg = sensor3_angle_cdeg;
     return MY_CONTROLLER_OK;
 }
 
@@ -763,6 +850,9 @@ MyController_Status_t MyController_ReadSensorAbsoluteCdeg(
 MyController_Status_t MyController_ReadThreeSensors(
     MyController_ThreeSensorReadout_t *readout)
 {
+    int32_t sensor_angle_cdeg = 0;
+    int32_t sensor_delta_cdeg = 0;
+
     if (readout == NULL) {
         return MY_CONTROLLER_ERR_NULL_PTR;
     }
@@ -774,9 +864,16 @@ MyController_Status_t MyController_ReadThreeSensors(
     readout->sensor1_status = (int8_t)prv_ReadSensorAngleCdeg(
         MY_CONTROLLER_SENSOR1_CHANNEL,
         &s_sensor1_data,
-        &readout->sensor1_angle_cdeg);
+        &sensor_angle_cdeg);
     if (readout->sensor1_status == (int8_t)TCA9548A_OK) {
-        readout->sensor1_raw_angle = s_sensor1_data.angle;
+        sensor_delta_cdeg = prv_CalculateShortestThreeSensorDeltaCdeg(
+            s_sensor1_zero_cdeg,
+            sensor_angle_cdeg);
+        readout->sensor1_angle_cdeg = prv_ScaleSensorDeltaCdeg(
+            sensor_delta_cdeg,
+            MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM,
+            MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN);
+        readout->sensor1_raw_angle = s_sensor1_data.raw_angle;
     } else {
         readout->sensor1_angle_cdeg = 0;
         readout->sensor1_raw_angle = 0U;
@@ -785,9 +882,16 @@ MyController_Status_t MyController_ReadThreeSensors(
     readout->sensor2_status = (int8_t)prv_ReadSensorAngleCdeg(
         MY_CONTROLLER_SENSOR2_CHANNEL,
         &s_sensor2_data,
-        &readout->sensor2_angle_cdeg);
+        &sensor_angle_cdeg);
     if (readout->sensor2_status == (int8_t)TCA9548A_OK) {
-        readout->sensor2_raw_angle = s_sensor2_data.angle;
+        sensor_delta_cdeg = prv_CalculateShortestThreeSensorDeltaCdeg(
+            s_sensor2_zero_cdeg,
+            sensor_angle_cdeg);
+        readout->sensor2_angle_cdeg = prv_ScaleSensorDeltaCdeg(
+            sensor_delta_cdeg,
+            MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM,
+            MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN);
+        readout->sensor2_raw_angle = s_sensor2_data.raw_angle;
     } else {
         readout->sensor2_angle_cdeg = 0;
         readout->sensor2_raw_angle = 0U;
@@ -796,9 +900,16 @@ MyController_Status_t MyController_ReadThreeSensors(
     readout->sensor3_status = (int8_t)prv_ReadSensorAngleCdeg(
         MY_CONTROLLER_SENSOR3_CHANNEL,
         &s_sensor3_data,
-        &readout->sensor3_angle_cdeg);
+        &sensor_angle_cdeg);
     if (readout->sensor3_status == (int8_t)TCA9548A_OK) {
-        readout->sensor3_raw_angle = s_sensor3_data.angle;
+        sensor_delta_cdeg = prv_CalculateShortestThreeSensorDeltaCdeg(
+            s_sensor3_zero_cdeg,
+            sensor_angle_cdeg);
+        readout->sensor3_angle_cdeg = prv_ScaleSensorDeltaCdeg(
+            sensor_delta_cdeg,
+            MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM,
+            MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN);
+        readout->sensor3_raw_angle = s_sensor3_data.raw_angle;
     } else {
         readout->sensor3_angle_cdeg = 0;
         readout->sensor3_raw_angle = 0U;

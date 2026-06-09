@@ -61,19 +61,19 @@
 #define MY_APP_MOTOR2_FORWARD_DIR               MY_APP_MOTOR_DIR_CW
 
 /** @brief Tử số tỉ lệ bước của Motor2. */
-#define MY_APP_MOTOR2_STEP_SCALE_NUM            91U
+#define MY_APP_MOTOR2_STEP_SCALE_NUM            90U
 
 /** @brief Mẫu số tỉ lệ bước của Motor2. */
-#define MY_APP_MOTOR2_STEP_SCALE_DEN            20U
+#define MY_APP_MOTOR2_STEP_SCALE_DEN            21U
 
 /** @brief Chiều tiến của Motor3 khi góc đích lớn hơn góc hiện tại. */
 #define MY_APP_MOTOR3_FORWARD_DIR               MY_APP_MOTOR_DIR_CCW
 
 /** @brief Tử số tỉ lệ bước của Motor3. */
-#define MY_APP_MOTOR3_STEP_SCALE_NUM            91U
+#define MY_APP_MOTOR3_STEP_SCALE_NUM            90U
 
 /** @brief Mẫu số tỉ lệ bước của Motor3. */
-#define MY_APP_MOTOR3_STEP_SCALE_DEN            20U
+#define MY_APP_MOTOR3_STEP_SCALE_DEN            21U
 
 /* Cài đặt chế độ quỹ đạo ------------------------------------------------- */
 

@@ -48,6 +48,12 @@
 /** @brief Tần số xung STEP cho lệnh điều khiển ba động cơ. */
 #define MY_APP_THREE_MOTOR_SPEED_HZ             3200U
 
+/** @brief Vận tốc tối đa mặc định cho profile hình thang ba motor (độ/giây). */
+#define MY_APP_TRAP_V_MAX_DPS                   200.0f
+
+/** @brief Gia tốc mặc định cho profile hình thang ba motor (độ/giây²). */
+#define MY_APP_TRAP_ACC_DPS2                    80.0f
+
 /** @brief Chiều tiến của Motor1 khi góc đích lớn hơn góc hiện tại. */
 #define MY_APP_MOTOR1_FORWARD_DIR               MY_APP_MOTOR_DIR_CCW
 

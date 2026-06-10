@@ -12,6 +12,8 @@
 #include "my_config.h"
 #include "tca9548a.h"
 #include "tim.h"
+#include "trajectory.h"
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -85,6 +87,15 @@ TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
 /** @brief Đặt khác 0 để bật lọc Kalman. */
 #define MY_CONTROLLER_USE_KALMAN_FILTER         MY_APP_SENSOR_FILTER_MODE
 
+/** @brief Vận tốc tối đa profile hình thang ba motor (deg/s). */
+#define MY_CONTROLLER_TRAP_V_MAX_DPS            MY_APP_TRAP_V_MAX_DPS
+
+/** @brief Gia tốc profile hình thang ba motor (deg/s²). */
+#define MY_CONTROLLER_TRAP_ACC_DPS2             MY_APP_TRAP_ACC_DPS2
+
+/** @brief Bước thời gian profile hình thang (s). */
+#define MY_CONTROLLER_TRAP_DT_S                 (MY_CONTROLLER_TRAP_TICK_MS / 1000.0f)
+
 /**
  * @brief  Trạng thái bộ lọc Kalman 1 chiều cho góc tuyệt đối AS5600.
  */
@@ -129,6 +140,14 @@ static int32_t s_motor3_current_cdeg = 0;
 
 /** @brief Bộ lọc góc tuyệt đối AS5600. */
 static my_controller_kalman_filter_t s_sensor_filter;
+
+/* --- Trạng thái profile vận tốc hình thang ba motor ---------------------- */
+
+static Traj_Handle_t s_traj1;          /**< Quỹ đạo hình thang motor1. */
+static Traj_Handle_t s_traj2;          /**< Quỹ đạo hình thang motor2. */
+static Traj_Handle_t s_traj3;          /**< Quỹ đạo hình thang motor3. */
+static bool          s_trap_active;    /**< true khi đang chạy profile hình thang. */
+static uint32_t      s_trap_last_tick_ms; /**< Thời điểm tick gần nhất, ms. */
 
 static bool prv_IsTca9548aAddress(uint8_t device_address);
 static int8_t prv_I2cWrite(uint8_t device_address,
@@ -179,6 +198,7 @@ static int32_t prv_CalculateSensorDeltaCdeg(int32_t start_cdeg,
                                             int32_t end_cdeg,
                                             int32_t expected_delta_cdeg);
 static void prv_StopThreeMotors(void);
+static uint32_t prv_TrapVelToHz(float vel_dps, uint32_t steps_per_turn);
 
 /**
  * @brief  Kiểm tra địa chỉ I2C có thuộc dải địa chỉ TCA9548A hay không.
@@ -1188,4 +1208,272 @@ void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
     if (htim == motor3.htim) {
         (void)TMC2209_UpdateSteps(&motor3);
     }
+}
+
+/* ============================================================================
+ * Trapezoid velocity profile — ba motor đồng nhất
+ * ============================================================================ */
+
+/**
+ * @brief  Chuyển vận tốc deg/s sang tần số xung STEP (Hz), kẹp vào [min, max].
+ * @param  vel_dps:        Vận tốc (deg/s), lấy giá trị tuyệt đối.
+ * @param  steps_per_turn: steps_per_rev × microstep của motor.
+ * @return Tần số xung STEP đã kẹp vào [MY_RUNNER_MIN_SPEED_HZ, MY_RUNNER_MAX_SPEED_HZ].
+ */
+static uint32_t prv_TrapVelToHz(float vel_dps, uint32_t steps_per_turn)
+{
+    uint32_t hz;
+
+    if (vel_dps < 0.0f)
+    {
+        vel_dps = -vel_dps;
+    }
+
+    hz = (uint32_t)((vel_dps * (float)steps_per_turn) / 360.0f);
+
+    if (hz < MY_RUNNER_MIN_SPEED_HZ) { hz = MY_RUNNER_MIN_SPEED_HZ; }
+    if (hz > MY_RUNNER_MAX_SPEED_HZ) { hz = MY_RUNNER_MAX_SPEED_HZ; }
+
+    return hz;
+}
+
+/**
+ * @brief  Bắt đầu di chuyển ba motor bằng profile vận tốc hình thang đồng nhất.
+ *
+ * Đồng nhất vận tốc: motor đi ngắn hơn được scale v_max và acc xuống tỉ lệ
+ * với (delta_riêng / delta_max), đảm bảo cả ba hoàn thành cùng thời điểm.
+ */
+MyController_Status_t MyController_StartTrapMove(
+    const MyController_ThreeMotorMoveCommand_t *command,
+    MyController_ThreeMotorMoveContext_t *context)
+{
+    float delta1_deg;
+    float delta2_deg;
+    float delta3_deg;
+    float abs1;
+    float abs2;
+    float abs3;
+    float dist_max;
+    float k1;
+    float k2;
+    float k3;
+
+    if ((command == NULL) || (context == NULL))
+    {
+        return MY_CONTROLLER_ERR_NULL_PTR;
+    }
+
+    if (s_trap_active == true)
+    {
+        return MY_CONTROLLER_ERR_MOTOR;
+    }
+
+    /* Điền context để lớp app có thể báo cáo target/delta/steps sau khi xong. */
+    context->motor1_start_cdeg = s_motor1_current_cdeg;
+    context->motor2_start_cdeg = s_motor2_current_cdeg;
+    context->motor3_start_cdeg = s_motor3_current_cdeg;
+    context->motor1_angle_cdeg = command->motor1_angle_cdeg;
+    context->motor2_angle_cdeg = command->motor2_angle_cdeg;
+    context->motor3_angle_cdeg = command->motor3_angle_cdeg;
+    context->motor1_delta_cdeg = command->motor1_angle_cdeg - s_motor1_current_cdeg;
+    context->motor2_delta_cdeg = command->motor2_angle_cdeg - s_motor2_current_cdeg;
+    context->motor3_delta_cdeg = command->motor3_angle_cdeg - s_motor3_current_cdeg;
+    context->motor1_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor1, context->motor1_delta_cdeg),
+        MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM, MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN);
+    context->motor2_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor2, context->motor2_delta_cdeg),
+        MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM, MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN);
+    context->motor3_target_steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor3, context->motor3_delta_cdeg),
+        MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM, MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN);
+
+    /* Tính quãng đường tuyệt đối từng motor để tìm motor đi xa nhất. */
+    delta1_deg = (float)context->motor1_delta_cdeg / 100.0f;
+    delta2_deg = (float)context->motor2_delta_cdeg / 100.0f;
+    delta3_deg = (float)context->motor3_delta_cdeg / 100.0f;
+    abs1 = fabsf(delta1_deg);
+    abs2 = fabsf(delta2_deg);
+    abs3 = fabsf(delta3_deg);
+    dist_max = abs1;
+    if (abs2 > dist_max) { dist_max = abs2; }
+    if (abs3 > dist_max) { dist_max = abs3; }
+
+    if (dist_max < 0.01f)
+    {
+        /* Cả ba motor đã ở đích, không cần di chuyển. */
+        s_trap_active = false;
+        return MY_CONTROLLER_OK;
+    }
+
+    /*
+     * Scale k = dist_rieng / dist_max cho mỗi motor:
+     *   - v_max_i = k_i × V_MAX  → motor đi ngắn chạy chậm hơn
+     *   - acc_i   = k_i × ACC    → hệ số giảm tốc cùng tỉ lệ
+     * Khi cả v_max và acc cùng bị scale bởi k, thời gian tăng tốc T_accel = V/A
+     * không đổi cho mọi motor, nên tất cả hoàn thành đúng cùng thời điểm.
+     */
+    k1 = abs1 / dist_max;
+    k2 = abs2 / dist_max;
+    k3 = abs3 / dist_max;
+
+    Traj_Init(&s_traj1,
+              (float)command->motor1_angle_cdeg / 100.0f,
+              (float)s_motor1_current_cdeg     / 100.0f,
+              k1 * MY_CONTROLLER_TRAP_V_MAX_DPS,
+              k1 * MY_CONTROLLER_TRAP_ACC_DPS2);
+
+    Traj_Init(&s_traj2,
+              (float)command->motor2_angle_cdeg / 100.0f,
+              (float)s_motor2_current_cdeg     / 100.0f,
+              k2 * MY_CONTROLLER_TRAP_V_MAX_DPS,
+              k2 * MY_CONTROLLER_TRAP_ACC_DPS2);
+
+    Traj_Init(&s_traj3,
+              (float)command->motor3_angle_cdeg / 100.0f,
+              (float)s_motor3_current_cdeg     / 100.0f,
+              k3 * MY_CONTROLLER_TRAP_V_MAX_DPS,
+              k3 * MY_CONTROLLER_TRAP_ACC_DPS2);
+
+    s_trap_active      = true;
+    s_trap_last_tick_ms = HAL_GetTick();
+
+    return MY_CONTROLLER_OK;
+}
+
+/**
+ * @brief  Cập nhật profile hình thang và ra lệnh motor theo chu kỳ 20 ms.
+ *
+ * Mỗi tick: tính delta vị trí từ trajectory → số bước → tần số → MoveSteps.
+ * Dừng motor cũ trước khi phát lệnh mới để tránh tích lũy bước thừa.
+ */
+void MyController_TrapProcess(void)
+{
+    uint32_t now_ms;
+    float    prev_pos_deg;
+    float    new_pos_deg;
+    int32_t  delta_cdeg;
+    uint32_t steps;
+    uint32_t hz;
+    uint32_t steps_per_turn;
+
+    if (s_trap_active == false)
+    {
+        return;
+    }
+
+    now_ms = HAL_GetTick();
+    if ((now_ms - s_trap_last_tick_ms) < MY_CONTROLLER_TRAP_TICK_MS)
+    {
+        return;
+    }
+    s_trap_last_tick_ms = now_ms;
+
+    /* --- Motor 1 --- */
+    /* Output steps per turn = motor_steps × gear_ratio(NUM/DEN) để hz khớp
+     * với output velocity: hz = v_output × output_steps_per_turn / 360. */
+    steps_per_turn = (uint32_t)(((uint64_t)motor1.steps_per_rev *
+                                  (uint64_t)motor1.microstep *
+                                  MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM) /
+                                 MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN);
+    prev_pos_deg = s_traj1.current_pos;
+    new_pos_deg  = Traj_Update(&s_traj1, MY_CONTROLLER_TRAP_DT_S);
+    delta_cdeg   = (int32_t)((new_pos_deg - prev_pos_deg) * 100.0f);
+    steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor1, delta_cdeg),
+        MY_CONTROLLER_MOTOR1_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR1_STEP_SCALE_DEN);
+    hz = prv_TrapVelToHz(s_traj1.v_cur_dps, steps_per_turn);
+    TMC2209_Stop(&motor1);
+    if (steps > 0U)
+    {
+        (void)TMC2209_MoveSteps(
+            &motor1, steps,
+            prv_GetThreeMotorDirection(delta_cdeg, MY_CONTROLLER_MOTOR1_FORWARD_DIR),
+            hz);
+    }
+
+    /* --- Motor 2 --- */
+    steps_per_turn = (uint32_t)(((uint64_t)motor2.steps_per_rev *
+                                  (uint64_t)motor2.microstep *
+                                  MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM) /
+                                 MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN);
+    prev_pos_deg = s_traj2.current_pos;
+    new_pos_deg  = Traj_Update(&s_traj2, MY_CONTROLLER_TRAP_DT_S);
+    delta_cdeg   = (int32_t)((new_pos_deg - prev_pos_deg) * 100.0f);
+    steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor2, delta_cdeg),
+        MY_CONTROLLER_MOTOR2_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR2_STEP_SCALE_DEN);
+    hz = prv_TrapVelToHz(s_traj2.v_cur_dps, steps_per_turn);
+    TMC2209_Stop(&motor2);
+    if (steps > 0U)
+    {
+        (void)TMC2209_MoveSteps(
+            &motor2, steps,
+            prv_GetThreeMotorDirection(delta_cdeg, MY_CONTROLLER_MOTOR2_FORWARD_DIR),
+            hz);
+    }
+
+    /* --- Motor 3 --- */
+    steps_per_turn = (uint32_t)(((uint64_t)motor3.steps_per_rev *
+                                  (uint64_t)motor3.microstep *
+                                  MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM) /
+                                 MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN);
+    prev_pos_deg = s_traj3.current_pos;
+    new_pos_deg  = Traj_Update(&s_traj3, MY_CONTROLLER_TRAP_DT_S);
+    delta_cdeg   = (int32_t)((new_pos_deg - prev_pos_deg) * 100.0f);
+    steps = prv_ScaleMotorSteps(
+        prv_CalculateMotorStepsFromCdeg(&motor3, delta_cdeg),
+        MY_CONTROLLER_MOTOR3_STEP_SCALE_NUM,
+        MY_CONTROLLER_MOTOR3_STEP_SCALE_DEN);
+    hz = prv_TrapVelToHz(s_traj3.v_cur_dps, steps_per_turn);
+    TMC2209_Stop(&motor3);
+    if (steps > 0U)
+    {
+        (void)TMC2209_MoveSteps(
+            &motor3, steps,
+            prv_GetThreeMotorDirection(delta_cdeg, MY_CONTROLLER_MOTOR3_FORWARD_DIR),
+            hz);
+    }
+
+    /* Kiểm tra tất cả quỹ đạo đã kết thúc. */
+    if (Traj_IsDone(&s_traj1) &&
+        Traj_IsDone(&s_traj2) &&
+        Traj_IsDone(&s_traj3))
+    {
+        prv_StopThreeMotors();
+        s_trap_active = false;
+    }
+}
+
+/**
+ * @brief  Kiểm tra lệnh hình thang đã hoàn tất chưa.
+ */
+bool MyController_IsTrapMoveDone(void)
+{
+    return (s_trap_active == false);
+}
+
+/**
+ * @brief  Hoàn tất lệnh hình thang và cập nhật vị trí phần mềm mới.
+ */
+MyController_Status_t MyController_FinishTrapMove(
+    const MyController_ThreeMotorMoveContext_t *context)
+{
+    if (context == NULL)
+    {
+        return MY_CONTROLLER_ERR_NULL_PTR;
+    }
+
+    if (s_trap_active == true)
+    {
+        return MY_CONTROLLER_ERR_MOTOR;
+    }
+
+    s_motor1_current_cdeg = context->motor1_angle_cdeg;
+    s_motor2_current_cdeg = context->motor2_angle_cdeg;
+    s_motor3_current_cdeg = context->motor3_angle_cdeg;
+
+    return MY_CONTROLLER_OK;
 }

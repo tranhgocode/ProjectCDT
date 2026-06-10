@@ -15,6 +15,9 @@
 /** @brief Một vòng quay, tính bằng centi-độ. */
 #define MY_CONTROLLER_FULL_TURN_CDEG    36000L
 
+/** @brief Chu kỳ cập nhật profile hình thang ba motor, tính bằng mili giây. */
+#define MY_CONTROLLER_TRAP_TICK_MS      20U
+
 extern TMC2209_HandleTypeDef motor1; /**< Driver TMC2209 thứ nhất. */
 extern TMC2209_HandleTypeDef motor2; /**< Driver TMC2209 thứ hai. */
 extern TMC2209_HandleTypeDef motor3; /**< Driver TMC2209 thứ ba. */
@@ -201,5 +204,38 @@ MyController_Status_t MyController_FinishTargetMove(
  * @return Số microstep đã làm tròn cần dùng cho chuyển động.
  */
 uint32_t MyController_CalculateMotorStepsFromAngle(int32_t angle_cdeg);
+
+/**
+ * @brief  Bắt đầu di chuyển ba motor bằng profile vận tốc hình thang đồng nhất.
+ * @param[in]  command: Ba góc mục tiêu tuyệt đối, tính bằng centi-độ.
+ * @param[out] context: Ngữ cảnh lưu target/delta/steps để dùng khi báo cáo.
+ * @return MY_CONTROLLER_OK nếu lệnh được chấp nhận.
+ * @note   Motor nào đi ngắn hơn sẽ được giảm v_max và acc tỉ lệ thuận để
+ *         tất cả ba motor hoàn thành đúng cùng thời điểm.
+ */
+MyController_Status_t MyController_StartTrapMove(
+    const MyController_ThreeMotorMoveCommand_t *command,
+    MyController_ThreeMotorMoveContext_t *context);
+
+/**
+ * @brief  Cập nhật profile hình thang và ra lệnh motor theo chu kỳ 20 ms.
+ * @note   Gọi lặp trong main loop. Tự quản lý chu kỳ bằng HAL_GetTick().
+ *         Tự dừng khi tất cả ba motor hoàn thành quỹ đạo.
+ */
+void MyController_TrapProcess(void);
+
+/**
+ * @brief  Kiểm tra lệnh hình thang đã hoàn tất chưa.
+ * @return true nếu tất cả ba motor đã đến đích.
+ */
+bool MyController_IsTrapMoveDone(void);
+
+/**
+ * @brief  Hoàn tất lệnh hình thang và cập nhật vị trí phần mềm mới.
+ * @param[in] context: Ngữ cảnh đã lưu khi bắt đầu lệnh chạy.
+ * @return MY_CONTROLLER_OK nếu vị trí phần mềm được cập nhật thành công.
+ */
+MyController_Status_t MyController_FinishTrapMove(
+    const MyController_ThreeMotorMoveContext_t *context);
 
 #endif /* MYLIB_INC_MY_CONTROLLER_H_ */

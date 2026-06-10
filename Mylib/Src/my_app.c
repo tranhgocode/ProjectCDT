@@ -21,6 +21,7 @@ typedef enum {
     MY_APP_STATE_WAIT_MOTOR,
     MY_APP_STATE_WAIT_THREE_MOTOR,
     MY_APP_STATE_TRAJ_RUNNING,    /**< Dang thuc thi quy dao tu PC. */
+    MY_APP_STATE_WAIT_TRAP_MOTOR, /**< Đang chạy profile hình thang ba motor. */
 } my_app_state_t;
 
 /** @brief Trang thai hien tai cua xu ly lenh. */
@@ -51,6 +52,7 @@ static bool my_app_start_three_motor_move(
 static void my_app_process_usb_command(void);
 static void my_app_process_motor_done(void);
 static void my_app_process_three_motor_done(void);
+static void my_app_process_trap_done(void);
 
 /** @brief Vi tri ghi hien tai trong s_usb_tx_buffer, dung chung cho report. */
 static uint16_t s_report_length = 0U;
@@ -140,7 +142,7 @@ static bool my_app_start_target_move(int32_t target_yaw_cdeg)
 }
 
 /**
- * @brief  Bat dau lenh chay dong thoi ba motor tu USB CDC.
+ * @brief  Bat dau lenh chay dong thoi ba motor bang profile van toc hinh thang.
  * @param  command: Ba goc can chay theo thu tu motor1, motor2, motor3.
  * @return true neu lenh duoc controller chap nhan.
  */
@@ -149,24 +151,19 @@ static bool my_app_start_three_motor_move(
 {
     MyController_Status_t controller_status;
 
-    controller_status = MyController_StartThreeMotorMove(
-        command,
-        &s_three_motor_context);
+    controller_status = MyController_StartTrapMove(command, &s_three_motor_context);
+
     if (controller_status == MY_CONTROLLER_ERR_MOTOR) {
-        Command_UsbSendText("ERR: three-motor start failed\r\n");
+        Command_UsbSendText("ERR: three-motor trap start failed\r\n");
         return false;
     }
 
     if (controller_status != MY_CONTROLLER_OK) {
-        Command_UsbSendText("ERR: three-motor command failed\r\n");
+        Command_UsbSendText("ERR: three-motor trap command failed\r\n");
         return false;
     }
 
-    /*
-     * Lenh toan so 0 van di qua trang thai cho de terminal nhan duoc report
-     * cung dinh dang voi cac lenh co tao xung STEP.
-     */
-    s_app_state = MY_APP_STATE_WAIT_THREE_MOTOR;
+    s_app_state = MY_APP_STATE_WAIT_TRAP_MOTOR;
     return true;
 }
 
@@ -345,6 +342,69 @@ static void my_app_process_three_motor_done(void)
 }
 
 /**
+ * @brief  Chạy và giám sát lệnh di chuyển hình thang ba motor.
+ *
+ * Gọi TrapProcess() mỗi lần để duy trì cập nhật 20 ms. Khi tất cả quỹ đạo
+ * hoàn tất, cập nhật vị trí phần mềm và gửi báo cáo cùng định dạng three_ok.
+ */
+static void my_app_process_trap_done(void)
+{
+    MyController_Status_t controller_status;
+    MyController_ThreeSensorReadout_t sensor_readout;
+
+    MyController_TrapProcess();
+
+    if (MyController_IsTrapMoveDone() == false)
+    {
+        return;
+    }
+
+    controller_status = MyController_FinishTrapMove(&s_three_motor_context);
+    if (controller_status != MY_CONTROLLER_OK)
+    {
+        Command_UsbSendText("ERR: three-motor trap finish failed\r\n");
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
+        return;
+    }
+
+    controller_status = MyController_ReadThreeSensors(&sensor_readout);
+    if (controller_status != MY_CONTROLLER_OK)
+    {
+        Command_UsbSendText("ERR: cannot read 3 AS5600 sensors\r\n");
+        s_app_state = MY_APP_STATE_WAIT_COMMAND;
+        return;
+    }
+
+    s_usb_tx_buffer[0] = '\0';
+    s_report_length = 0U;
+    s_buf_text("three_ok,m1_t="); s_buf_angle(s_three_motor_context.motor1_angle_cdeg);
+    s_buf_text(",m1_d=");         s_buf_angle(s_three_motor_context.motor1_delta_cdeg);
+    s_buf_text(",m1_s=");         s_buf_unsigned(s_three_motor_context.motor1_target_steps);
+    s_buf_text(",m2_t=");         s_buf_angle(s_three_motor_context.motor2_angle_cdeg);
+    s_buf_text(",m2_d=");         s_buf_angle(s_three_motor_context.motor2_delta_cdeg);
+    s_buf_text(",m2_s=");         s_buf_unsigned(s_three_motor_context.motor2_target_steps);
+    s_buf_text(",m3_t=");         s_buf_angle(s_three_motor_context.motor3_angle_cdeg);
+    s_buf_text(",m3_d=");         s_buf_angle(s_three_motor_context.motor3_delta_cdeg);
+    s_buf_text(",m3_s=");         s_buf_unsigned(s_three_motor_context.motor3_target_steps);
+    s_buf_text(",as1=");          s_buf_sensor(sensor_readout.sensor1_angle_cdeg, sensor_readout.sensor1_status);
+    s_buf_text(",as1_st=");       s_buf_signed((int32_t)sensor_readout.sensor1_status);
+    s_buf_text(",as2=");          s_buf_sensor(sensor_readout.sensor2_angle_cdeg, sensor_readout.sensor2_status);
+    s_buf_text(",as2_st=");       s_buf_signed((int32_t)sensor_readout.sensor2_status);
+    s_buf_text(",as3=");          s_buf_sensor(sensor_readout.sensor3_angle_cdeg, sensor_readout.sensor3_status);
+    s_buf_text(",as3_st=");       s_buf_signed((int32_t)sensor_readout.sensor3_status);
+    s_buf_text("\r\n");
+
+    if ((s_report_length > 0U) &&
+        (s_report_length < (uint16_t)sizeof(s_usb_tx_buffer)))
+    {
+        Command_UsbSendBuffer((uint8_t *)s_usb_tx_buffer, s_report_length);
+    }
+
+    (void)MyController_ResetThreeSensorZero();
+    s_app_state = MY_APP_STATE_WAIT_COMMAND;
+}
+
+/**
  * @brief  Xu ly trang thai thuc thi quy dao: nap frame moi va kiem tra ket thuc.
  */
 static void my_app_process_traj(void)
@@ -438,6 +498,11 @@ void my_app_process(void)
 
     if (s_app_state == MY_APP_STATE_WAIT_COMMAND) {
         my_app_process_usb_command();
+        return;
+    }
+
+    if (s_app_state == MY_APP_STATE_WAIT_TRAP_MOTOR) {
+        my_app_process_trap_done();
         return;
     }
 

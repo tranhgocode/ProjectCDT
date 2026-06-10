@@ -1456,6 +1456,20 @@ bool MyController_IsTrapMoveDone(void)
 }
 
 /**
+ * @brief  Hủy lệnh hình thang đang chạy và dừng cả ba motor ngay lập tức.
+ */
+void MyController_AbortTrap(void)
+{
+    if (s_trap_active == false)
+    {
+        return;
+    }
+
+    prv_StopThreeMotors();
+    s_trap_active = false;
+}
+
+/**
  * @brief  Hoàn tất lệnh hình thang và cập nhật vị trí phần mềm mới.
  */
 MyController_Status_t MyController_FinishTrapMove(

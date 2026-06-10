@@ -231,6 +231,13 @@ void MyController_TrapProcess(void);
 bool MyController_IsTrapMoveDone(void);
 
 /**
+ * @brief  Hủy lệnh hình thang đang chạy và dừng cả ba motor ngay lập tức.
+ * @note   Không cập nhật vị trí phần mềm — gọi sau khi abort để giữ
+ *         s_motorN_current_cdeg ở giá trị cũ (vị trí trước lệnh bị hủy).
+ */
+void MyController_AbortTrap(void);
+
+/**
  * @brief  Hoàn tất lệnh hình thang và cập nhật vị trí phần mềm mới.
  * @param[in] context: Ngữ cảnh đã lưu khi bắt đầu lệnh chạy.
  * @return MY_CONTROLLER_OK nếu vị trí phần mềm được cập nhật thành công.

@@ -20,6 +20,29 @@ from robot.target_object import create_target_cube
 
 
 SAFE_TARGET_RADIUS = GROUND_TARGET_MAX_RADIUS - 0.02
+TWO_PI = 2 * math.pi
+REAL_ROBOT_HOME_DEG = np.array([0.0, 0.86, -14.76], dtype=float)
+WRIST_HOME_DEG = 0.0
+MOTOR_TO_SIM_SIGNS = np.array([-1.0, 1.0, 1.0], dtype=float)
+
+
+def normalize_yaw(angle):
+    return angle % TWO_PI
+
+
+def shortest_yaw_delta(current, target):
+    return (target - current + math.pi) % TWO_PI - math.pi
+
+
+def motor_angles_to_sim_radians(motor_angles_deg):
+    motor_angles_deg = np.asarray(motor_angles_deg, dtype=float)
+    if motor_angles_deg.shape != (3,):
+        raise ValueError("Expected [motor1, motor2, motor3] angles in degrees")
+
+    yaw_deg, shoulder_deg, elbow_deg = motor_angles_deg * MOTOR_TO_SIM_SIGNS
+    q = np.radians([yaw_deg, shoulder_deg, elbow_deg, WRIST_HOME_DEG])
+    q[0] = normalize_yaw(q[0])
+    return q
 
 
 def clamp_ground_target(target):
@@ -67,6 +90,7 @@ def compute_joint_positions(angles):
 
 def print_joint_status(q, label="Current"):
     degrees = np.degrees(q)
+    degrees[0] = math.degrees(normalize_yaw(q[0]))
     positions = compute_joint_positions(q)
     print(f"\n[{label}] Góc các khớp (độ): {[round(x, 2) for x in degrees]}")
     for idx, pos in enumerate(positions):
@@ -87,7 +111,9 @@ def run_3d_simulation(target_queue):
     camera.lookAt(np.array([0.0, 1.0, 0.0]), up=np.array([0, 1, 0]))
 
     joints = build_robot_4dof(scene)
-    curr_q = np.zeros(4, dtype=float)
+    curr_q = motor_angles_to_sim_radians(REAL_ROBOT_HOME_DEG)
+    apply_joint_rotations(joints, curr_q.tolist())
+    print_joint_status(curr_q, label="Home")
     target_pos = choose_random_target(height=0.0)  # Gắp vật trên mặt đất
     target_cube = create_target_cube(scene, target_pos, size=0.2)
     dest_q = curr_q.copy()
@@ -108,6 +134,7 @@ def run_3d_simulation(target_queue):
             res = inverse_kinematics_optimized(target_pos, curr_q)
             if res is not None:
                 dest_q = np.array(res, dtype=float)
+                dest_q[0] = normalize_yaw(dest_q[0])
                 
                 # **KIỂM TRA: Đảm bảo không có joint nào xuyên qua mặt đất, end-effector tiếp xúc mặt đất**
                 safe, heights = check_ground_collision(dest_q)
@@ -133,12 +160,12 @@ def run_3d_simulation(target_queue):
                 pygame.quit()
                 return
         if state == STATE_ROTATING_BASE:
-            delta = dest_q[0] - curr_q[0]
+            delta = shortest_yaw_delta(curr_q[0], dest_q[0])
             if abs(delta) > 0.01:
-                curr_q[0] += np.sign(delta) * min(step, abs(delta))
+                curr_q[0] = normalize_yaw(curr_q[0] + np.sign(delta) * min(step, abs(delta)))
                 apply_joint_rotations(joints, curr_q.tolist())
             else:
-                curr_q[0] = dest_q[0]
+                curr_q[0] = normalize_yaw(dest_q[0])
                 state = STATE_MOVING_ARM
 
         elif state == STATE_MOVING_ARM:

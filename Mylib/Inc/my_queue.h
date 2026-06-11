@@ -1,98 +1,66 @@
 /**
  * @file    my_queue.h
- * @brief   Frame 20 byte và hàng đợi vòng cho quỹ đạo nhận từ PC qua USB CDC.
+ * @brief   Hàng đợi vòng lưu RobotCommand nhận từ nhóm 4 (protocol decoder).
  * @author  Lap4all
- * @date    2026-06-10
+ * @date    2026-06-11
  */
 
 #ifndef MYLIB_INC_MY_QUEUE_H_
 #define MYLIB_INC_MY_QUEUE_H_
 
+#include "protocol.h"
 #include <stdbool.h>
 #include <stdint.h>
 
-/*
- * Bố cục frame 20 byte (little-endian):
- *   [0]      0xAA          Header byte 0
- *   [1]      0x55          Header byte 1
- *   [2..5]   float         theta1 (deg, LE)
- *   [6..9]   float         theta2 (deg, LE)
- *   [10..13] float         theta3 (deg, LE)
- *   [14..17] float         theta4 (deg, LE) — servo
- *   [18]     uint8_t       Checksum = XOR(bytes[2..17])
- *   [19]     0xFF          Footer
- */
-
-/** @brief Kích thước frame thô nhận từ PC, tính bằng byte. */
-#define MY_QUEUE_FRAME_SIZE         20U
-
-/** @brief Byte đầu của header frame quỹ đạo. */
-#define MY_QUEUE_FRAME_HEADER_0     0xAAU
-
-/** @brief Byte thứ hai của header frame quỹ đạo. */
-#define MY_QUEUE_FRAME_HEADER_1     0x55U
-
-/** @brief Byte footer cuối frame quỹ đạo. */
-#define MY_QUEUE_FRAME_FOOTER       0xFFU
+/** @brief Số lệnh tối đa lưu trong hàng đợi. */
+#define CMD_QUEUE_SIZE  10U
 
 /**
- * @brief  Dữ liệu đã giải mã của một frame quỹ đạo.
+ * @brief  Khởi tạo hàng đợi về trạng thái rỗng.
  */
-typedef struct {
-    float theta1_deg;  /**< Góc mục tiêu motor1, tính bằng độ. */
-    float theta2_deg;  /**< Góc mục tiêu motor2, tính bằng độ. */
-    float theta3_deg;  /**< Góc mục tiêu motor3, tính bằng độ. */
-    float theta4_deg;  /**< Góc khớp 4 (servo). */
-} MyQueue_Frame_t;
+void    MyQueue_Init(void);
 
 /**
- * @brief  Khởi tạo hàng đợi và bộ parser byte về trạng thái ban đầu.
+ * @brief  Thêm một RobotCommand vào cuối hàng đợi.
+ * @param  cmd: Con trỏ tới lệnh cần thêm (không được NULL).
+ * @return true nếu thêm thành công, false nếu hàng đợi đầy.
  */
-void     MyQueue_Init(void);
+bool    MyQueue_Push(const RobotCommand *cmd);
 
 /**
- * @brief  Nạp byte thô từ USB CDC và tự động parse thành frame khi đủ dữ liệu.
- * @param  data:   Con trỏ tới mảng byte cần xử lý.
- * @param  length: Số byte cần xử lý.
- * @note   Parser giữ trạng thái nội bộ giữa các lần gọi — xử lý đúng frame
- *         bị tách thành nhiều lần nhận USB.
- */
-void     MyQueue_FeedBytes(const uint8_t *data, uint16_t length);
-
-/**
- * @brief  Lấy một frame từ đầu hàng đợi.
- * @param  frame: Nơi lưu frame lấy ra.
+ * @brief  Lấy một RobotCommand từ đầu hàng đợi (FIFO).
+ * @param  cmd: Nơi lưu lệnh lấy ra (không được NULL).
  * @return true nếu lấy thành công, false nếu hàng đợi rỗng.
  */
-bool     MyQueue_Pop(MyQueue_Frame_t *frame);
-
-/**
- * @brief  Trả về số frame hiện có trong hàng đợi.
- * @return Số frame đang chờ thực thi.
- */
-uint16_t MyQueue_Count(void);
-
-/**
- * @brief  Kiểm tra hàng đợi có rỗng không.
- * @return true nếu không còn frame nào.
- */
-bool     MyQueue_IsEmpty(void);
+bool    MyQueue_Pop(RobotCommand *cmd);
 
 /**
  * @brief  Kiểm tra hàng đợi có đầy không.
- * @return true nếu không còn chỗ cho frame mới.
+ * @return true nếu không còn chỗ cho lệnh mới.
  */
-bool     MyQueue_IsFull(void);
+bool    MyQueue_IsFull(void);
 
 /**
- * @brief  Xóa toàn bộ frame và đặt lại parser về trạng thái tìm header.
+ * @brief  Kiểm tra hàng đợi có rỗng không.
+ * @return true nếu không còn lệnh nào.
  */
-void     MyQueue_Flush(void);
+bool    MyQueue_IsEmpty(void);
 
 /**
- * @brief  Kiểm tra có frame nào bị drop do queue đầy kể từ lần gọi trước.
+ * @brief  Trả về số lệnh đang chờ trong hàng đợi.
+ * @return Số lệnh hiện có (0 .. CMD_QUEUE_SIZE).
+ */
+uint8_t MyQueue_Count(void);
+
+/**
+ * @brief  Xóa toàn bộ lệnh trong hàng đợi.
+ */
+void    MyQueue_Flush(void);
+
+/**
+ * @brief  Kiểm tra có lệnh nào bị bỏ qua do queue đầy kể từ lần gọi trước.
  * @return true nếu có drop, tự reset sau khi đọc.
  */
-bool     MyQueue_WasDropped(void);
+bool    MyQueue_WasDropped(void);
 
 #endif /* MYLIB_INC_MY_QUEUE_H_ */

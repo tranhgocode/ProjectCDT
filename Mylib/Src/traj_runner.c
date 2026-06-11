@@ -95,7 +95,8 @@ void MyRunner_Init(void)
 
 void MyRunner_FeedBytes(const uint8_t *data, uint16_t length)
 {
-    MyQueue_FeedBytes(data, length);
+    (void)data;
+    (void)length;
 }
 
 void MyRunner_Start(void)
@@ -150,7 +151,7 @@ bool MyRunner_IsActive(void)
  */
 void MyRunner_Process(void)
 {
-    MyQueue_Frame_t                      frame;
+    RobotCommand                         frame;
     MyController_ThreeMotorMoveCommand_t cmd;
 
     if (s_state != MY_RUNNER_STATE_RUNNING)
@@ -188,9 +189,9 @@ void MyRunner_Process(void)
     /* Pop và bắt đầu frame kế tiếp bằng trap profile. */
     (void)MyQueue_Pop(&frame);
 
-    cmd.motor1_angle_cdeg = (int32_t)(frame.theta1_deg * 100.0f);
-    cmd.motor2_angle_cdeg = (int32_t)(frame.theta2_deg * 100.0f);
-    cmd.motor3_angle_cdeg = (int32_t)(frame.theta3_deg * 100.0f);
+    cmd.motor1_angle_cdeg = frame.angle1_x100;
+    cmd.motor2_angle_cdeg = frame.angle2_x100;
+    cmd.motor3_angle_cdeg = frame.angle3_x100;
 
     if (MyController_StartTrapMove(&cmd, &s_trap_ctx) == MY_CONTROLLER_OK)
     {

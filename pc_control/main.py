@@ -17,7 +17,10 @@ from robot.kinematics import (
 from robot.robot_builder import build_robot_4dof, apply_joint_rotations
 from graphics.drawing_utils import draw_grid
 from robot.target_object import create_target_cube
+from comm import RobotSerial
 
+# Cổng COM kết nối STM32 — đổi sang cổng thực tế, hoặc đặt None để tắt serial
+STM32_PORT = "COM10"
 
 SAFE_TARGET_RADIUS = GROUND_TARGET_MAX_RADIUS - 0.02
 TWO_PI = 2 * math.pi
@@ -123,9 +126,18 @@ def run_3d_simulation(target_queue):
     STATE_ROTATING_BASE = 1
     STATE_MOVING_ARM = 2
     state = STATE_IDLE
-    
+
     step = 0.05  # Tốc độ di chuyển
     clock = pygame.time.Clock()
+
+    # Kết nối serial tới STM32 (bỏ qua nếu không có cổng)
+    robot_serial: RobotSerial | None = None
+    if STM32_PORT:
+        try:
+            robot_serial = RobotSerial(STM32_PORT)
+            robot_serial.open()
+        except Exception as e:
+            print(f"[Serial] Không mở được {STM32_PORT}: {e} — chạy không có serial")
 
     while True:
         # Lấy mục tiêu mới từ màn hình 2D
@@ -157,6 +169,8 @@ def run_3d_simulation(target_queue):
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                if robot_serial:
+                    robot_serial.close()
                 pygame.quit()
                 return
         if state == STATE_ROTATING_BASE:
@@ -182,6 +196,8 @@ def run_3d_simulation(target_queue):
             if reached:
                 state = STATE_IDLE
                 print_joint_status(curr_q, label="Đã tới mục tiêu")
+                if robot_serial and robot_serial.is_open():
+                    robot_serial.send_angles(curr_q)
 
         # OpenGL render
         glClearColor(0.12, 0.12, 0.14, 1.0)

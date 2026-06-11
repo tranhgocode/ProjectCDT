@@ -30,6 +30,24 @@
 /my_tool/__pycache__/
 *.pyc
 
+# PC control Python app
+/pc_control/**/__pycache__/
+/pc_control/**/*.py[cod]
+/pc_control/.venv/
+/pc_control/venv/
+/pc_control/env/
+/pc_control/.env
+/pc_control/.env.*
+/pc_control/logs/
+/pc_control/output/
+/pc_control/outputs/
+/pc_control/.pytest_cache/
+/pc_control/.mypy_cache/
+/pc_control/.ruff_cache/
+/pc_control/build/
+/pc_control/dist/
+/pc_control/*.egg-info/
+
 # Eclipse workspace/cache files
 /.metadata/
 /.recommenders/

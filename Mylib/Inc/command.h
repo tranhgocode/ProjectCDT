@@ -1,8 +1,8 @@
 /**
  * @file    command.h
- * @brief   Giao dien phan tich lenh va truyen nhan USB CDC.
+ * @brief   Giao diện phân tích lệnh và truyền nhận USB CDC.
  * @author  Lap4all
- * @date    2026-05-17
+ * @date    2026-06-10
  */
 
 #ifndef INC_COMMAND_H_
@@ -12,112 +12,45 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/** @brief Kich thuoc bo dem truyen USB CDC, tinh bang byte. */
+/** @brief Kích thước bộ đệm truyền USB CDC, tính bằng byte. */
 #define COMMAND_USB_TX_BUFFER_SIZE  256U
 
-/** @brief Kich thuoc bo dem nhan lenh USB CDC, tinh bang byte. */
-#define COMMAND_USB_RX_BUFFER_SIZE   64U
+/** @brief Kích thước bộ đệm nhận lệnh USB CDC, tính bằng byte. */
+#define COMMAND_USB_RX_BUFFER_SIZE   128U
 
-/** @brief Kich thuoc chuoi cho mot truong goc, tinh ca ky tu ket thuc null. */
-#define COMMAND_ANGLE_TEXT_SIZE      16U
+/** @brief Kích thước ring buffer nhận byte từ USB CDC. */
+#define USB_RX_LINE_BUFFER_SIZE      256U
 
-/**
- * @brief  Kiem tra USB CDC da cau hinh va san sang truyen goi moi chua.
- * @return true neu USB CDC co the truyen, nguoc lai false.
- */
-bool    Command_UsbIsReady(void);
+bool Command_UsbIsReady(void);
+void Command_UsbSendText(const char *text);
+void Command_UsbSendBuffer(uint8_t *buf, uint16_t length);
 
 /**
- * @brief  Gui chuoi ket thuc null qua USB CDC voi gioi han do dai.
- * @param  text: Chuoi ket thuc null can gui.
+ * @brief  Đẩy byte thô từ CDC_Receive_FS vào ring buffer nội bộ.
+ * @note   Gọi từ ngắt USB — chỉ lưu byte, không parse, không điều khiển motor.
  */
-void    Command_UsbSendText(const char *text);
+void USB_RX_PushBytes(uint8_t *data, uint32_t len);
 
 /**
- * @brief  Gui bo dem nhi phan qua USB CDC.
- * @param  buf: Con tro den du lieu can gui.
- * @param  length: So byte can gui.
+ * @brief  Lấy một dòng hoàn chỉnh (kết thúc bằng '\\n') ra khỏi ring buffer.
+ * @param  line:    Buffer đầu ra, được null-terminate, không chứa '\\n'/'\\r'.
+ * @param  max_len: Kích thước buffer đầu ra tính bằng byte (bao gồm '\\0').
+ * @return 1 nếu có dòng hoàn chỉnh, 0 nếu chưa đủ dữ liệu.
  */
-void    Command_UsbSendBuffer(uint8_t *buf, uint16_t length);
+int USB_RX_GetLine(char *line, uint16_t max_len);
 
-/**
- * @brief  Doc mot lenh tu bo dem nhan USB CDC.
- * @param  buffer: Bo dem dich chua du lieu nhan.
- * @param  buffer_size: Kich thuoc bo dem dich, tinh bang byte.
- * @param  length: So byte thuc te nhan duoc.
- * @return 1 neu co lenh cho xu ly, 0 neu bo dem trong.
- */
-uint8_t Command_ReadUsb(uint8_t *buffer, uint16_t buffer_size,
-                        uint16_t *length);
-
-/**
- * @brief  Nhan dien lenh "zero" khong phan biet chu hoa, chu thuong.
- * @param  buffer: Cac byte lenh nhan duoc.
- * @param  length: So byte trong buffer.
- * @return true neu lenh yeu cau dat lai yaw zero, nguoc lai false.
- */
 bool Command_IsZeroCommand(const uint8_t *buffer, uint16_t length);
-
-/**
- * @brief  Nhan dien lenh "GO" khong phan biet chu hoa, chu thuong.
- * @param  buffer: Cac byte lenh nhan duoc.
- * @param  length: So byte trong buffer.
- * @return true neu lenh bat dau thuc thi quy dao, nguoc lai false.
- */
 bool Command_IsGoCommand(const uint8_t *buffer, uint16_t length);
-
-/**
- * @brief  Nhan dien lenh "STOP" khong phan biet chu hoa, chu thuong.
- * @param  buffer: Cac byte lenh nhan duoc.
- * @param  length: So byte trong buffer.
- * @return true neu lenh dung khan cap quy dao, nguoc lai false.
- */
 bool Command_IsStopCommand(const uint8_t *buffer, uint16_t length);
 
 /**
- * @brief  Phan tich lenh yaw dang so thap phan sang centi-do.
- * @param  buffer: Cac byte lenh nhan duoc.
- * @param  length: So byte trong buffer.
- * @param  target_angle_cdeg: Goc sau khi phan tich, tinh bang centi-do.
- * @return true neu lenh la goc thap phan hop le, nguoc lai false.
- * @note   Chi giu hai chu so thap phan de khop voi cach luu centi-do.
+ * @brief  Phân tích lệnh gồm ba góc mục tiêu để chạy đồng thời ba motor.
+ * @note   Chấp nhận dạng "10 20 30", "10,20,30" hoặc "10;20;30".
  */
-bool Command_ParseTargetAngleCdeg(const uint8_t *buffer, uint16_t length,
-                                  int32_t *target_angle_cdeg);
+bool Command_ParseThreeMotorCommand(const uint8_t *buffer, uint16_t length,
+                                    MyController_ThreeMotorMoveCommand_t *command);
 
-/**
- * @brief  Phan tich lenh gom ba goc muc tieu de chay dong thoi ba motor.
- * @param  buffer: Cac byte lenh nhan duoc.
- * @param  length: So byte trong buffer.
- * @param  command: Noi luu ba goc muc tieu, tinh bang centi-do.
- * @return true neu lenh co dung ba gia tri goc hop le.
- * @note   Chap nhan dang "10 20 30", "10,20,30" hoac "10;20;30".
- */
-bool Command_ParseThreeMotorCommand(
-    const uint8_t *buffer,
-    uint16_t length,
-    MyController_ThreeMotorMoveCommand_t *command);
-
-/**
- * @brief  Dinh dang goc centi-do thanh chuoi do co co dinh hai chu so le.
- * @param  angle_cdeg: Goc tinh bang centi-do.
- * @param  buffer: Bo dem chuoi dich.
- * @param  buffer_size: Kich thuoc bo dem dich, tinh bang byte.
- * @note   Dinh dang bang so nguyen de khong can bat ho tro printf so thuc.
- */
-void Command_FormatAngleDeg(int32_t angle_cdeg, char *buffer,
-                            uint16_t buffer_size);
-
-/**
- * @brief  Dinh dang ket qua doc mot AS5600 thanh goc hoac ma loi.
- * @param  angle_cdeg: Goc doc duoc, tinh bang centi-do.
- * @param  sensor_status: Ma loi kenh TCA9548A/AS5600, 0 la doc thanh cong.
- * @param  buffer: Bo dem chuoi dich.
- * @param  buffer_size: Kich thuoc bo dem dich, tinh bang byte.
- */
-void Command_FormatSensorReadout(int32_t angle_cdeg, int8_t sensor_status,
-                                 char *buffer, uint16_t buffer_size);
-
+/* String builder helpers */
 void Command_AppendChar(char *buffer, uint16_t buffer_size, uint16_t *index,
                         char value);
 void Command_AppendText(char *buffer, uint16_t buffer_size, uint16_t *index,

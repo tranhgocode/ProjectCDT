@@ -23,6 +23,7 @@
 
 /* USER CODE BEGIN INCLUDE */
 #include "main.h"
+#include "command.h"
 #include <string.h>
 
 /* USER CODE END INCLUDE */
@@ -103,9 +104,6 @@ static uint8_t cdc_line_coding[7] =
   0x00,                   /* No parity */
   0x08                    /* 8 data bits */
 };
-static uint8_t cdc_rx_command_buffer[APP_RX_DATA_SIZE];
-static volatile uint16_t cdc_rx_command_length = 0U;
-static volatile uint8_t cdc_rx_command_pending = 0U;
 
 /* USER CODE END PRIVATE_VARIABLES */
 
@@ -273,20 +271,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  if ((*Len > 0U) && (cdc_rx_command_pending == 0U))
-  {
-    uint16_t copy_length = (uint16_t)*Len;
-
-    if (copy_length >= APP_RX_DATA_SIZE)
-    {
-      copy_length = APP_RX_DATA_SIZE - 1U;
-    }
-
-    (void)memcpy(cdc_rx_command_buffer, Buf, copy_length);
-    cdc_rx_command_buffer[copy_length] = '\0';
-    cdc_rx_command_length = copy_length;
-    cdc_rx_command_pending = 1U;
-  }
+  USB_RX_PushBytes(Buf, *Len);
 
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
@@ -324,35 +309,6 @@ uint8_t CDC_Transmit_FS(uint8_t* Buf, uint16_t Len)
 }
 
 /* USER CODE BEGIN PRIVATE_FUNCTIONS_IMPLEMENTATION */
-uint8_t CDC_ReadCommand(uint8_t *buffer, uint16_t buffer_size, uint16_t *length)
-{
-  uint16_t copy_length;
-
-  if ((buffer == NULL) || (length == NULL) || (buffer_size == 0U))
-  {
-    return 0U;
-  }
-
-  if (cdc_rx_command_pending == 0U)
-  {
-    return 0U;
-  }
-
-  __disable_irq();
-  copy_length = cdc_rx_command_length;
-  if (copy_length >= buffer_size)
-  {
-    copy_length = buffer_size - 1U;
-  }
-  (void)memcpy(buffer, cdc_rx_command_buffer, copy_length);
-  buffer[copy_length] = '\0';
-  *length = copy_length;
-  cdc_rx_command_pending = 0U;
-  cdc_rx_command_length = 0U;
-  __enable_irq();
-
-  return 1U;
-}
 
 /* USER CODE END PRIVATE_FUNCTIONS_IMPLEMENTATION */
 

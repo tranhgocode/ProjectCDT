@@ -1,8 +1,8 @@
 /**
  * @file    my_queue.h
- * @brief   Frame 36 byte và hàng đợi vòng cho quỹ đạo nhận từ PC qua USB CDC.
+ * @brief   Frame 20 byte và hàng đợi vòng cho quỹ đạo nhận từ PC qua USB CDC.
  * @author  Lap4all
- * @date    2026-06-08
+ * @date    2026-06-10
  */
 
 #ifndef MYLIB_INC_MY_QUEUE_H_
@@ -12,23 +12,19 @@
 #include <stdint.h>
 
 /*
- * Bố cục frame 36 byte (little-endian):
+ * Bố cục frame 20 byte (little-endian):
  *   [0]      0xAA          Header byte 0
  *   [1]      0x55          Header byte 1
- *   [2..5]   uint32_t      Timestep (LE)
- *   [6..9]   float         theta1 (deg, LE)
- *   [10..13] float         vel1   (deg/s, LE)
- *   [14..17] float         theta2 (deg, LE)
- *   [18..21] float         vel2   (deg/s, LE)
- *   [22..25] float         theta3 (deg, LE)
- *   [26..29] float         vel3   (deg/s, LE)
- *   [30..33] float         theta4 (deg, LE) — servo, chưa dùng
- *   [34]     uint8_t       Checksum = XOR(bytes[2..33])
- *   [35]     0xFF          Footer
+ *   [2..5]   float         theta1 (deg, LE)
+ *   [6..9]   float         theta2 (deg, LE)
+ *   [10..13] float         theta3 (deg, LE)
+ *   [14..17] float         theta4 (deg, LE) — servo
+ *   [18]     uint8_t       Checksum = XOR(bytes[2..17])
+ *   [19]     0xFF          Footer
  */
 
 /** @brief Kích thước frame thô nhận từ PC, tính bằng byte. */
-#define MY_QUEUE_FRAME_SIZE         36U
+#define MY_QUEUE_FRAME_SIZE         20U
 
 /** @brief Byte đầu của header frame quỹ đạo. */
 #define MY_QUEUE_FRAME_HEADER_0     0xAAU
@@ -43,14 +39,10 @@
  * @brief  Dữ liệu đã giải mã của một frame quỹ đạo.
  */
 typedef struct {
-    uint32_t timestep;    /**< Chỉ số thời gian mẫu. */
-    float    theta1_deg;  /**< Góc mục tiêu motor1, tính bằng độ. */
-    float    vel1_dps;    /**< Vận tốc motor1, tính bằng độ/giây. */
-    float    theta2_deg;  /**< Góc mục tiêu motor2, tính bằng độ. */
-    float    vel2_dps;    /**< Vận tốc motor2, tính bằng độ/giây. */
-    float    theta3_deg;  /**< Góc mục tiêu motor3, tính bằng độ. */
-    float    vel3_dps;    /**< Vận tốc motor3, tính bằng độ/giây. */
-    float    theta4_deg;  /**< Góc khớp 4 (servo, chưa sử dụng). */
+    float theta1_deg;  /**< Góc mục tiêu motor1, tính bằng độ. */
+    float theta2_deg;  /**< Góc mục tiêu motor2, tính bằng độ. */
+    float theta3_deg;  /**< Góc mục tiêu motor3, tính bằng độ. */
+    float theta4_deg;  /**< Góc khớp 4 (servo). */
 } MyQueue_Frame_t;
 
 /**

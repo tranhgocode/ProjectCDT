@@ -14,12 +14,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/** @brief Tổng thời gian mô phỏng motor chạy một lệnh (Giai đoạn 1), ms. */
-#define MOTION_STUB_TOTAL_MS   1000U
-
-/** @brief Bước chia nhỏ delay để refresh IWDG giữa chừng (ms). */
-#define MOTION_STUB_CHUNK_MS    100U
-
 /* ============================================================================
  * Private variables
  * ============================================================================ */
@@ -216,7 +210,8 @@ void MyRunner_Process(void)
 
 bool Motion_GotoAngles(const RobotCommand *cmd)
 {
-    uint32_t elapsed_ms;
+    MyController_ThreeMotorMoveCommand_t move_cmd;
+    MyController_ThreeMotorMoveContext_t move_ctx;
 
     if (cmd == NULL)
     {
@@ -224,22 +219,38 @@ bool Motion_GotoAngles(const RobotCommand *cmd)
     }
 
     /*
-     * GIAI ĐOẠN 1 — mô phỏng motor chạy ~1s để kiểm thử toàn tuyến
-     * PC -> decode -> queue -> motion -> DONE mà chưa cần motor thật.
+     * GIAI ĐOẠN 2 — chạy motor thật bằng trap engine của my_controller.
      *
-     * IWDG timeout ~2s và chỉ được refresh 1 lần/vòng main, nên ta chia nhỏ
-     * delay và tự refresh để khối blocking này không gây watchdog reset.
-     * Giai đoạn 2 sẽ thay nguyên khối for này bằng:
-     *   StartTrapMove(...) + while(!IsTrapMoveDone()){ TrapProcess(); refresh; }
-     *   FinishTrapMove(...)
+     * Góc trong RobotCommand là tuyệt đối ×100 (centi-độ), khớp trực tiếp với
+     * motorN_angle_cdeg. Vị trí bắt đầu lấy từ vị trí phần mềm hiện tại bên
+     * trong StartTrapMove nên các lệnh liên tiếp nối quỹ đạo đúng.
      */
-    for (elapsed_ms = 0U;
-         elapsed_ms < MOTION_STUB_TOTAL_MS;
-         elapsed_ms += MOTION_STUB_CHUNK_MS)
+    move_cmd.motor1_angle_cdeg = cmd->angle1_x100;
+    move_cmd.motor2_angle_cdeg = cmd->angle2_x100;
+    move_cmd.motor3_angle_cdeg = cmd->angle3_x100;
+
+    if (MyController_StartTrapMove(&move_cmd, &move_ctx) != MY_CONTROLLER_OK)
     {
-        HAL_Delay(MOTION_STUB_CHUNK_MS);
+        return false;
+    }
+
+    /*
+     * Mô hình blocking: tick profile hình thang tới khi cả ba motor về đích.
+     * TrapProcess() tự giới hạn cadence 20 ms bằng HAL_GetTick(), nên vòng spin
+     * này chỉ ra lệnh motor mỗi 20 ms. Refresh IWDG mỗi vòng để khối blocking
+     * dài (vài trăm ms tới vài giây) không gây watchdog reset (~2 s).
+     *
+     * Trường hợp delta ~0: StartTrapMove trả OK với trap không active, nên
+     * IsTrapMoveDone() đúng ngay lập tức và vòng lặp không chạy lần nào.
+     */
+    while (!MyController_IsTrapMoveDone())
+    {
+        MyController_TrapProcess();
         HAL_IWDG_Refresh(&hiwdg);
     }
+
+    /* Cập nhật vị trí phần mềm về góc đích cho lệnh kế tiếp. */
+    (void)MyController_FinishTrapMove(&move_ctx);
 
     return true;
 }

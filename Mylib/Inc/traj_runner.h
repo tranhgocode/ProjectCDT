@@ -63,7 +63,7 @@ bool MyRunner_IsActive(void);
 void MyRunner_Process(void);
 
 /* ============================================================================
- * Motion task (Giai đoạn 1 — nhóm 6) — Docs/protocol.md §12.5
+ * Motion task — Docs/protocol.md §12.5
  * ============================================================================
  *
  * Mô hình BLOCKING, chạy đúng 1 lệnh mỗi lần gọi:
@@ -73,8 +73,8 @@ void MyRunner_Process(void);
  *     rồi gửi $D. Vì blocking nên lệnh kế chỉ được lấy ở lần gọi sau, đảm bảo
  *     "chạy xong command hiện tại mới lấy command tiếp theo".
  *
- * Giai đoạn 1 dùng stub (mô phỏng motor bằng delay). Giai đoạn 2 sẽ thay phần
- * thân Motion_GotoAngles() bằng trap engine của my_controller.
+ * Giai đoạn 2 (hiện tại): Motion_GotoAngles() chạy motor thật bằng trap engine
+ * của my_controller (StartTrapMove -> TrapProcess loop -> FinishTrapMove).
  */
 
 /**
@@ -87,7 +87,8 @@ void MotionTask_Run(void);
  * @brief  Điều khiển 3 motor chạy tới góc trong lệnh, blocking tới khi xong.
  * @param  cmd: Lệnh cần thực thi (angleN_x100 là góc tuyệt đối ×100).
  * @return true nếu chạy xong thành công, false nếu lỗi motor.
- * @note   Giai đoạn 1: stub mô phỏng bằng delay + refresh IWDG.
+ * @note   Giai đoạn 2: blocking bằng trap engine my_controller; refresh IWDG
+ *         trong vòng tick để khối blocking không gây watchdog reset.
  */
 bool Motion_GotoAngles(const RobotCommand *cmd);
 

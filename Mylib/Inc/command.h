@@ -9,6 +9,7 @@
 #define INC_COMMAND_H_
 
 #include "my_controller.h"
+#include "protocol.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -24,6 +25,22 @@
 bool Command_UsbIsReady(void);
 void Command_UsbSendText(const char *text);
 void Command_UsbSendBuffer(uint8_t *buf, uint16_t length);
+
+/* ----------------------------------------------------------------------------
+ * Response sender (contract nhóm 4 — Docs/protocol.md §14.3)
+ *   ACK : $A,<seq>\n
+ *   DONE: $D,<seq>,<angle1_x100>,<angle2_x100>,<angle3_x100>\n
+ *   ERR : $E,<seq>,<CODE>\n   (CODE: FORMAT | RANGE | QUEUE_FULL | MOTOR)
+ * -------------------------------------------------------------------------- */
+
+/** @brief Báo đã nhận và đẩy lệnh vào queue thành công. */
+void Response_SendACK(uint8_t seq);
+
+/** @brief Báo motion task đã chạy xong một lệnh, echo lại góc x100 thô. */
+void Response_SendDONE(const RobotCommand *cmd);
+
+/** @brief Báo lỗi cho một seq với mã lỗi dạng chuỗi. */
+void Response_SendERR(uint8_t seq, const char *err_code);
 
 /**
  * @brief  Đẩy byte thô từ CDC_Receive_FS vào ring buffer nội bộ.

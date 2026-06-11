@@ -8,6 +8,7 @@
 #ifndef MYLIB_INC_MY_RUNNER_H_
 #define MYLIB_INC_MY_RUNNER_H_
 
+#include "protocol.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -60,5 +61,34 @@ bool MyRunner_IsActive(void);
  *         tự dừng motor và chuyển về IDLE.
  */
 void MyRunner_Process(void);
+
+/* ============================================================================
+ * Motion task (Giai đoạn 1 — nhóm 6) — Docs/protocol.md §12.5
+ * ============================================================================
+ *
+ * Mô hình BLOCKING, chạy đúng 1 lệnh mỗi lần gọi:
+ *   - MotionTask_Run() được gọi liên tục trong vòng main khi app IDLE.
+ *   - Queue rỗng  -> không làm gì.
+ *   - Queue có lệnh -> pop 1 lệnh, gọi Motion_GotoAngles() chạy tới khi xong,
+ *     rồi gửi $D. Vì blocking nên lệnh kế chỉ được lấy ở lần gọi sau, đảm bảo
+ *     "chạy xong command hiện tại mới lấy command tiếp theo".
+ *
+ * Giai đoạn 1 dùng stub (mô phỏng motor bằng delay). Giai đoạn 2 sẽ thay phần
+ * thân Motion_GotoAngles() bằng trap engine của my_controller.
+ */
+
+/**
+ * @brief  Lấy một lệnh từ queue và thực thi (1 lệnh mỗi lần gọi).
+ * @note   Gọi lặp trong vòng main khi app ở trạng thái IDLE.
+ */
+void MotionTask_Run(void);
+
+/**
+ * @brief  Điều khiển 3 motor chạy tới góc trong lệnh, blocking tới khi xong.
+ * @param  cmd: Lệnh cần thực thi (angleN_x100 là góc tuyệt đối ×100).
+ * @return true nếu chạy xong thành công, false nếu lỗi motor.
+ * @note   Giai đoạn 1: stub mô phỏng bằng delay + refresh IWDG.
+ */
+bool Motion_GotoAngles(const RobotCommand *cmd);
 
 #endif /* MYLIB_INC_MY_RUNNER_H_ */

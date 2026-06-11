@@ -10,8 +10,15 @@
 #include "my_controller.h"
 #include "my_app.h"
 #include "command.h"
+#include "iwdg.h"
 #include <stdbool.h>
 #include <stdint.h>
+
+/** @brief Tổng thời gian mô phỏng motor chạy một lệnh (Giai đoạn 1), ms. */
+#define MOTION_STUB_TOTAL_MS   1000U
+
+/** @brief Bước chia nhỏ delay để refresh IWDG giữa chừng (ms). */
+#define MOTION_STUB_CHUNK_MS    100U
 
 /* ============================================================================
  * Private variables
@@ -200,5 +207,60 @@ void MyRunner_Process(void)
     else
     {
         Command_UsbSendText("ERR: trap start failed\r\n");
+    }
+}
+
+/* ============================================================================
+ * Motion task — Giai đoạn 1 (nhóm 6): pop queue -> chạy stub -> gửi $D
+ * ============================================================================ */
+
+bool Motion_GotoAngles(const RobotCommand *cmd)
+{
+    uint32_t elapsed_ms;
+
+    if (cmd == NULL)
+    {
+        return false;
+    }
+
+    /*
+     * GIAI ĐOẠN 1 — mô phỏng motor chạy ~1s để kiểm thử toàn tuyến
+     * PC -> decode -> queue -> motion -> DONE mà chưa cần motor thật.
+     *
+     * IWDG timeout ~2s và chỉ được refresh 1 lần/vòng main, nên ta chia nhỏ
+     * delay và tự refresh để khối blocking này không gây watchdog reset.
+     * Giai đoạn 2 sẽ thay nguyên khối for này bằng:
+     *   StartTrapMove(...) + while(!IsTrapMoveDone()){ TrapProcess(); refresh; }
+     *   FinishTrapMove(...)
+     */
+    for (elapsed_ms = 0U;
+         elapsed_ms < MOTION_STUB_TOTAL_MS;
+         elapsed_ms += MOTION_STUB_CHUNK_MS)
+    {
+        HAL_Delay(MOTION_STUB_CHUNK_MS);
+        HAL_IWDG_Refresh(&hiwdg);
+    }
+
+    return true;
+}
+
+void MotionTask_Run(void)
+{
+    RobotCommand cmd;
+
+    /* Queue rỗng -> không làm gì (giữ nguyên các lệnh còn lại). */
+    if (!MyQueue_Pop(&cmd))
+    {
+        return;
+    }
+
+    /* Chạy đúng 1 lệnh tới khi xong; lệnh kế lấy ở lần gọi sau. */
+    if (Motion_GotoAngles(&cmd))
+    {
+        Response_SendDONE(&cmd);
+    }
+    else
+    {
+        Response_SendERR(cmd.seq, "MOTOR");
     }
 }

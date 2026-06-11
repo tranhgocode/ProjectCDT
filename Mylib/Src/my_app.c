@@ -10,6 +10,7 @@
 #include "command.h"
 #include "traj_runner.h"
 #include "my_queue.h"
+#include "protocol.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -83,13 +84,42 @@ static void my_app_process_trap(void);
  * ============================================================================ */
 
 /**
- * @brief  Xử lý lệnh khi IDLE.
+ * @brief  Đẩy một dòng "$M,seq,a1,a2,a3" vào queue và trả lời ACK/ERR.
+ * @note   Đây là mắt xích nhóm 4/5: decode -> push -> ACK. Motion task
+ *         (MotionTask_Run) sẽ pop và chạy ở bước sau.
+ */
+static void my_app_handle_move_line(const char *line)
+{
+    RobotCommand   cmd;
+    ProtocolStatus st = Protocol_DecodeMoveLine(line, &cmd);
+
+    if (st == PROTO_OK)
+    {
+        if (MyQueue_Push(&cmd)) { Response_SendACK(cmd.seq); }
+        else                    { Response_SendERR(cmd.seq, "QUEUE_FULL"); }
+    }
+    else if (st == PROTO_ERR_RANGE)
+    {
+        Response_SendERR(cmd.seq, "RANGE");
+    }
+    else /* PROTO_ERR_FORMAT, PROTO_ERR_UNKNOWN_TYPE */
+    {
+        Response_SendERR(cmd.seq, "FORMAT");
+    }
+}
+
+/**
+ * @brief  Xử lý lệnh khi IDLE — rút cạn các dòng đang chờ trong ring buffer.
  *
- *   Binary frame 0xAA… → queue
- *   "GO"               → go_ok + chạy trajectory
- *   "STOP"             → flush queue
- *   "ZERO"             → hiệu chỉnh sensor
- *   "a b c"            → trap profile 3 motor
+ *   "$M,…"   → decode → push queue → $A/$E  (protocol nhóm 4)
+ *   "STOP"   → dừng + flush queue            (legacy bring-up)
+ *   "GO"     → go_ok + chạy trajectory       (legacy bring-up)
+ *   "ZERO"   → hiệu chỉnh sensor             (legacy bring-up)
+ *   "a b c"  → trap profile 3 motor          (legacy bring-up)
+ *   khác     → $E,0,FORMAT
+ *
+ * Rút cạn nhiều dòng/lần để một burst "$M,6…\n$M,7…\n" được ACK liên tiếp
+ * (A6, A7) trước khi motion chạy, đúng thứ tự contract §17.7.
  */
 static void my_app_process_idle(void)
 {
@@ -97,56 +127,58 @@ static void my_app_process_idle(void)
     uint16_t len;
     MyController_ThreeMotorMoveCommand_t three_cmd = {0};
 
-    if (USB_RX_GetLine(line, sizeof(line)) == 0) { return; }
-    len = (uint16_t)strlen(line);
-    if (len == 0U) { return; }
-
-    /* STOP */
-    if (Command_IsStopCommand((const uint8_t *)line, len))
+    while (USB_RX_GetLine(line, sizeof(line)) != 0)
     {
-        MyRunner_Stop();
-        return;
-    }
+        len = (uint16_t)strlen(line);
+        if (len == 0U) { continue; }
 
-    /* GO */
-    if (Command_IsGoCommand((const uint8_t *)line, len))
-    {
-        if (MyQueue_IsEmpty())
+        /* STOP (legacy) */
+        if (Command_IsStopCommand((const uint8_t *)line, len))
         {
-            Command_UsbSendText("ERR: queue empty\r\n");
+            MyRunner_Stop();
+            continue;
         }
-        else
+
+        /* GO (legacy) — đổi state, thoát IDLE */
+        if (Command_IsGoCommand((const uint8_t *)line, len))
         {
+            if (MyQueue_IsEmpty())
+            {
+                Command_UsbSendText("ERR: queue empty\r\n");
+                continue;
+            }
             Command_UsbSendText("go_ok\r\n");
             MyRunner_Start();
             s_app_state = MY_APP_STATE_TRAJ_RUNNING;
-        }
-        return;
-    }
-
-    /* ZERO */
-    if (Command_IsZeroCommand((const uint8_t *)line, len))
-    {
-        if (MyController_SetZeroFromSensor() == MY_CONTROLLER_OK)
-            Command_UsbSendText("zero_ok\r\n");
-        else
-            Command_UsbSendText("ERR: sensor read failed\r\n");
-        return;
-    }
-
-    /* "a b c" — trap profile */
-    if (Command_ParseThreeMotorCommand((const uint8_t *)line, len, &three_cmd))
-    {
-        if (MyController_StartTrapMove(&three_cmd, &s_trap_context) != MY_CONTROLLER_OK)
-        {
-            Command_UsbSendText("ERR: trap start failed\r\n");
             return;
         }
-        s_app_state = MY_APP_STATE_TRAP_RUNNING;
-        return;
-    }
 
-    Command_UsbSendText("ERR: unknown command\r\n");
+        /* ZERO (legacy) */
+        if (Command_IsZeroCommand((const uint8_t *)line, len))
+        {
+            if (MyController_SetZeroFromSensor() == MY_CONTROLLER_OK)
+                Command_UsbSendText("zero_ok\r\n");
+            else
+                Command_UsbSendText("ERR: sensor read failed\r\n");
+            continue;
+        }
+
+        /* "a b c" — trap profile thủ công (không bắt đầu bằng '$') */
+        if ((line[0] != '$') &&
+            Command_ParseThreeMotorCommand((const uint8_t *)line, len, &three_cmd))
+        {
+            if (MyController_StartTrapMove(&three_cmd, &s_trap_context) != MY_CONTROLLER_OK)
+            {
+                Command_UsbSendText("ERR: trap start failed\r\n");
+                continue;
+            }
+            s_app_state = MY_APP_STATE_TRAP_RUNNING;
+            return;
+        }
+
+        /* Còn lại: protocol $M hoặc dòng lỗi → $A/$E */
+        my_app_handle_move_line(line);
+    }
 }
 
 /** @brief Trajectory execution state. */
@@ -288,6 +320,13 @@ void my_app_process(void)
     {
     case MY_APP_STATE_TRAJ_RUNNING: my_app_process_traj(); break;
     case MY_APP_STATE_TRAP_RUNNING: my_app_process_trap(); break;
-    default:                        my_app_process_idle(); break;
+    default:
+        my_app_process_idle();
+        /* Còn IDLE (không có GO/trap) → motion task pop & chạy 1 lệnh. */
+        if (s_app_state == MY_APP_STATE_IDLE)
+        {
+            MotionTask_Run();
+        }
+        break;
     }
 }

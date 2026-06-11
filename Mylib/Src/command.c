@@ -200,6 +200,81 @@ void Command_UsbSendBuffer(uint8_t *buf, uint16_t length)
 }
 
 /* ============================================================================
+ * Response sender — $A / $D / $E theo contract nhóm 4
+ * ============================================================================ */
+
+/** @brief Thời gian chờ TX rảnh tối đa trước mỗi response, mili giây. */
+#define RESPONSE_TX_READY_TIMEOUT_MS  5U
+
+/**
+ * @brief  Chờ ngắn cho TX rảnh để hai response liên tiếp không bị rớt.
+ * @note   USB FS gửi vài byte trong < 1ms, nên timeout 5ms là dư.
+ */
+static void response_wait_tx_ready(void)
+{
+    uint32_t start_ms = HAL_GetTick();
+    while ((Command_UsbIsReady() == false) &&
+           ((HAL_GetTick() - start_ms) < RESPONSE_TX_READY_TIMEOUT_MS))
+    {
+        /* spin ngắn, có giới hạn */
+    }
+}
+
+void Response_SendACK(uint8_t seq)
+{
+    char     buf[COMMAND_USB_TX_BUFFER_SIZE];
+    uint16_t idx = 0U;
+
+    buf[0] = '\0';
+    Command_AppendText(buf, sizeof(buf), &idx, "$A,");
+    Command_AppendUnsigned(buf, sizeof(buf), &idx, (uint32_t)seq);
+    Command_AppendChar(buf, sizeof(buf), &idx, '\n');
+
+    response_wait_tx_ready();
+    Command_UsbSendBuffer((uint8_t *)buf, idx);
+}
+
+void Response_SendDONE(const RobotCommand *cmd)
+{
+    char     buf[COMMAND_USB_TX_BUFFER_SIZE];
+    uint16_t idx = 0U;
+
+    if (cmd == NULL) { return; }
+
+    /* DONE echo lại đúng giá trị x100 thô, KHÔNG đổi sang độ thập phân. */
+    buf[0] = '\0';
+    Command_AppendText(buf, sizeof(buf), &idx, "$D,");
+    Command_AppendUnsigned(buf, sizeof(buf), &idx, (uint32_t)cmd->seq);
+    Command_AppendChar(buf, sizeof(buf), &idx, ',');
+    Command_AppendSigned(buf, sizeof(buf), &idx, cmd->angle1_x100);
+    Command_AppendChar(buf, sizeof(buf), &idx, ',');
+    Command_AppendSigned(buf, sizeof(buf), &idx, cmd->angle2_x100);
+    Command_AppendChar(buf, sizeof(buf), &idx, ',');
+    Command_AppendSigned(buf, sizeof(buf), &idx, cmd->angle3_x100);
+    Command_AppendChar(buf, sizeof(buf), &idx, '\n');
+
+    response_wait_tx_ready();
+    Command_UsbSendBuffer((uint8_t *)buf, idx);
+}
+
+void Response_SendERR(uint8_t seq, const char *err_code)
+{
+    char     buf[COMMAND_USB_TX_BUFFER_SIZE];
+    uint16_t idx = 0U;
+
+    buf[0] = '\0';
+    Command_AppendText(buf, sizeof(buf), &idx, "$E,");
+    Command_AppendUnsigned(buf, sizeof(buf), &idx, (uint32_t)seq);
+    Command_AppendChar(buf, sizeof(buf), &idx, ',');
+    Command_AppendText(buf, sizeof(buf), &idx,
+                       (err_code != NULL) ? err_code : "UNKNOWN");
+    Command_AppendChar(buf, sizeof(buf), &idx, '\n');
+
+    response_wait_tx_ready();
+    Command_UsbSendBuffer((uint8_t *)buf, idx);
+}
+
+/* ============================================================================
  * Command recognition
  * ============================================================================ */
 

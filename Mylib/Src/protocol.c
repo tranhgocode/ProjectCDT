@@ -31,6 +31,10 @@ ProtocolStatus Protocol_DecodeMoveLine(const char *line, RobotCommand *cmd)
 {
     if (line == NULL || cmd == NULL) return PROTO_ERR_FORMAT;
 
+    /* Mặc định seq = 0 để nhánh lỗi (FORMAT khi chưa đọc được seq) vẫn echo
+     * đúng theo contract: "hello" -> $E,0,FORMAT. */
+    cmd->seq = 0U;
+
     /* Kiểm tra ký tự '$' đầu dòng */
     if (line[0] != '$') return PROTO_ERR_FORMAT;
 
@@ -48,6 +52,9 @@ ProtocolStatus Protocol_DecodeMoveLine(const char *line, RobotCommand *cmd)
     if (parse_field(p, &seq, &end) != 0) return PROTO_ERR_FORMAT;
     if (*end != ',') return PROTO_ERR_FORMAT;
     if (seq < 0 || seq > 255) return PROTO_ERR_FORMAT;
+    /* Giữ seq ngay khi đọc được để nhánh lỗi field sau ($M,2,9000,4550 ->
+     * $E,2,FORMAT) hoặc lỗi range ($M,3,999999,.. -> $E,3,RANGE) echo đúng. */
+    cmd->seq = (uint8_t)seq;
     p = end + 1;
 
     /* angle1 */

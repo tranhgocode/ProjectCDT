@@ -13,6 +13,7 @@ from robot.kinematics import (
     GROUND_TARGET_MAX_RADIUS,
     check_ground_collision,
     inverse_kinematics_optimized,
+    _wrap_to_pi,
 )
 from robot.robot_builder import build_robot_4dof, apply_joint_rotations
 from graphics.drawing_utils import draw_grid
@@ -46,6 +47,22 @@ def motor_angles_to_sim_radians(motor_angles_deg):
     q = np.radians([yaw_deg, shoulder_deg, elbow_deg, WRIST_HOME_DEG])
     q[0] = normalize_yaw(q[0])
     return q
+
+
+def sim_radians_to_motor_angles(q_sim):
+    """
+    Nghịch đảo của motor_angles_to_sim_radians: đổi góc khớp mô phỏng (radian)
+    -> góc motor (radian) để gửi xuống STM32.
+      - Áp MOTOR_TO_SIM_SIGNS (±1 nên tự nghịch đảo): sửa lỗi sai dấu yaw.
+      - Wrap yaw về [-pi, pi] vì protocol/firmware chỉ nhận [-180,180]: sửa lỗi
+        sai dải yaw (normalize_yaw trả [0,2pi) sẽ bị clamp cứng về 180°).
+    Trả về np.array 3 phần tử [yaw, shoulder, elbow] (radian). Shoulder/elbow là
+    khớp gập giới hạn nên để nguyên, dựa vào clamp ±18000 trong encode_move.
+    """
+    q = np.asarray(q_sim, dtype=float)[:3]
+    motor = q * MOTOR_TO_SIM_SIGNS
+    motor[0] = _wrap_to_pi(motor[0])  # yaw là khớp xoay liên tục
+    return motor
 
 
 def clamp_ground_target(target):
@@ -197,7 +214,7 @@ def run_3d_simulation(target_queue):
                 state = STATE_IDLE
                 print_joint_status(curr_q, label="Đã tới mục tiêu")
                 if robot_serial and robot_serial.is_open():
-                    robot_serial.send_angles(curr_q)
+                    robot_serial.send_angles(sim_radians_to_motor_angles(curr_q))
 
         # OpenGL render
         glClearColor(0.12, 0.12, 0.14, 1.0)
